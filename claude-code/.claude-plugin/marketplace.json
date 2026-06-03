@@ -1,0 +1,15 @@
+{
+  "name": "alibabacloud-database",
+  "description": "Database and observability plugins from Alibaba Cloud",
+  "owner": {
+    "name": "Alibaba Cloud Database",
+    "url": "https://www.alibabacloud.com/product/databases"
+  },
+  "plugins": [
+    {
+      "name": "langfuse",
+      "source": "./",
+      "description": "Trace Claude Code sessions to Langfuse"
+    }
+  ]
+}

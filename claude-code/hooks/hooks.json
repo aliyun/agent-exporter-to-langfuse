@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\"/hooks/ && if [ ! -f pyproject.toml ]; then uv init && uv add langfuse; fi && uv run python langfuse_hook.py",
+            "timeout": 20,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\"/hooks/ && if [ ! -f pyproject.toml ]; then uv init && uv add langfuse; fi && uv run python langfuse_hook.py",
+            "timeout": 20,
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
