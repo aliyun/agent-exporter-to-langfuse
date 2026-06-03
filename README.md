@@ -29,6 +29,6 @@ MIT
 
 Scan the QR code to join the DingTalk discussion group:
 
-<img src="https://ck-langfuse-public.oss-cn-beijing.aliyuncs.com/openclaw-exporter-to-langfuse/dingtalk-qr-code.JPG" alt="QR Code" width="250" />
+<img src="https://ck-langfuse-public.oss-cn-beijing.aliyuncs.com/agent-exporter-to-langfuse/dingtalk-qr-code.JPG" alt="QR Code" width="250" />
 
 **DingTalk Group**: 180485008966
