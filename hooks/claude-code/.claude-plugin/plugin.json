@@ -27,28 +27,25 @@
       "description": "Langfuse host. Use https://us.cloud.langfuse.com for US, https://cloud.langfuse.com for EU, or your self-hosted URL.",
       "required": true
     },
-    "CC_LANGFUSE_USER_ID": {
+    "LANGFUSE_USER_ID": {
       "type": "string",
       "title": "User ID",
       "description": "User identifier for Langfuse traces. Defaults to OS account username if not set."
     },
-    "CC_LANGFUSE_TAGS": {
+    "LANGFUSE_TAGS": {
       "type": "string",
       "title": "Tags",
-      "description": "Comma-separated tags for Langfuse traces (e.g. claude-code,production).",
-      "default": "claude-code"
+      "description": "Comma-separated tags for Langfuse traces (e.g. claude-code,production)."
     },
-    "CC_LANGFUSE_MAX_CHARS": {
+    "LANGFUSE_MAX_CHARS": {
       "type": "number",
       "title": "Max content chars",
-      "description": "Maximum characters to keep per content field (user message, tool output, etc). Larger values preserve more detail but increase storage.",
-      "default": 800000
+      "description": "Maximum characters to keep per content field. Default 800000."
     },
-    "CC_LANGFUSE_DEBUG": {
+    "LANGFUSE_DEBUG": {
       "type": "boolean",
       "title": "Debug logging",
-      "description": "Write verbose logs to ~/.claude/state/langfuse_hook.log",
-      "default": true
+      "description": "Write verbose logs to state/langfuse_hook.log. Default true."
     }
   }
 }

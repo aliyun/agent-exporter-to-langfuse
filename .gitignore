@@ -5,11 +5,11 @@
 *.swp
 *.swo
 
-# Python / uv (auto-generated in hooks dir)
-claude-code/hooks/.venv/
-claude-code/hooks/.python-version
-claude-code/hooks/pyproject.toml
-claude-code/hooks/uv.lock
+# Python / uv (auto-generated)
+.venv/
+.python-version
+pyproject.toml
+uv.lock
 
 # Claude Code local config
 .claude/
@@ -20,3 +20,6 @@ Thumbs.db
 
 # Logs & state
 *.log
+
+# ENV
+.env

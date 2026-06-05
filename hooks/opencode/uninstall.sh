@@ -4,7 +4,8 @@ set -euo pipefail
 OC_CONFIG_DIR="$HOME/.config/opencode"
 OC_CONFIG_FILE="$OC_CONFIG_DIR/opencode.json"
 PLUGIN_FILE="$OC_CONFIG_DIR/plugins/langfuse-exporter.mjs"
-LANGFUSE_ENV_FILE="$OC_CONFIG_DIR/langfuse.env"
+LANGFUSE_PROFILE_DIR="$HOME/.config/agent-exporter-to-langfuse"
+LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/opencode.env"
 LOG_DIR="$OC_CONFIG_DIR/logs/langfuse-exporter"
 LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/com.opencode.langfuse-env.plist"
 
@@ -74,27 +75,32 @@ else
     warn "Env file not found, skipping: $LANGFUSE_ENV_FILE"
 fi
 
-# --- 4. Remove source line from shell profile ---
-if [ -f "$SHELL_RC" ] && grep -qF "opencode/langfuse.env" "$SHELL_RC" 2>/dev/null; then
-    python3 -c "
+# --- 4. Clean up profile.d directory if empty ---
+if [ -d "$LANGFUSE_PROFILE_DIR" ] && [ -z "$(ls -A "$LANGFUSE_PROFILE_DIR" 2>/dev/null)" ]; then
+    rmdir "$LANGFUSE_PROFILE_DIR"
+    info "Removed empty profile directory: $LANGFUSE_PROFILE_DIR"
+
+    if [ -f "$SHELL_RC" ] && grep -qF "agent-exporter-to-langfuse" "$SHELL_RC" 2>/dev/null; then
+        python3 -c "
 import sys
 lines = open(sys.argv[1]).readlines()
 out = []
 skip_next = False
 for line in lines:
-    if '# Langfuse (OpenCode)' in line:
+    if '# Agent Langfuse Exporters' in line:
         skip_next = True
         if out and out[-1].strip() == '':
             out.pop()
         continue
-    if skip_next and 'langfuse.env' in line:
+    if skip_next and 'agent-exporter-to-langfuse' in line:
         skip_next = False
         continue
     skip_next = False
     out.append(line)
 open(sys.argv[1], 'w').writelines(out)
 " "$SHELL_RC"
-    info "Removed source line from $SHELL_RC."
+        info "Removed loader line from $SHELL_RC."
+    fi
 fi
 
 # --- 5. Remove LaunchAgent (macOS) ---

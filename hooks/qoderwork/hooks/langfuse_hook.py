@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Qoder -> Langfuse hook
+QoderWork -> Langfuse hook
 
 """
 
@@ -24,101 +24,14 @@ try:
 except Exception:
     sys.exit(0)
 
-# --- Qoder SQLite DB for token/model enrichment ---
-def _find_qoder_db() -> Optional[Path]:
-    """Locate the Qoder SharedClientCache SQLite DB (Desktop / IDE)."""
-    candidates = []
-    home = Path.home()
-    if sys.platform == "darwin":
-        candidates.append(home / "Library" / "Application Support" / "Qoder" / "SharedClientCache" / "cache" / "db" / "local.db")
-    else:
-        candidates.append(home / ".local" / "share" / "Qoder" / "SharedClientCache" / "cache" / "db" / "local.db")
-    candidates.append(home / ".qoder" / "shared_client" / "cache" / "db" / "local.db")
-    for p in candidates:
-        if p.exists():
-            return p
-    return None
 
-@dataclass
-class TokenInfo:
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cached_tokens: int = 0
-    model_key: str = ""
-    gmt_create_ms: int = 0
-
-def query_session_tokens(session_id: str) -> List[TokenInfo]:
-    """Query per-assistant-message token usage from the Qoder SQLite DB.
-
-    Returns rows ordered by gmt_create ASC so they can be matched to
-    transcript assistant messages by timestamp proximity.
-    """
-    db_path = _find_qoder_db()
-    if not db_path:
-        return []
-    try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path), timeout=2)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT
-                gmt_create,
-                json_extract(token_info, '$.prompt_tokens')     AS input_tokens,
-                json_extract(token_info, '$.completion_tokens') AS output_tokens,
-                json_extract(token_info, '$.cached_tokens')     AS cached_tokens,
-                CASE
-                    WHEN model_info IS NOT NULL AND model_info != ''
-                        THEN COALESCE(json_extract(model_info, '$.model_key'), '')
-                    ELSE ''
-                END AS model_key
-            FROM chat_message
-            WHERE session_id = ?
-              AND role = 'assistant'
-              AND token_info IS NOT NULL AND token_info != ''
-            ORDER BY gmt_create ASC
-            """,
-            (session_id,),
-        ).fetchall()
-        conn.close()
-        return [
-            TokenInfo(
-                input_tokens=int(r["input_tokens"] or 0),
-                output_tokens=int(r["output_tokens"] or 0),
-                cached_tokens=int(r["cached_tokens"] or 0),
-                model_key=str(r["model_key"] or ""),
-                gmt_create_ms=int(r["gmt_create"] or 0),
-            )
-            for r in rows
-        ]
-    except Exception:
-        return []
-
-def match_db_token(db_tokens: List[TokenInfo], ts: Optional[datetime], used: set) -> Optional[TokenInfo]:
-    """Find the best DB token record matching a transcript timestamp.
-
-    Uses nearest-timestamp within a 5-second window. Each DB record is
-    used at most once (tracked via `used` set of indices).
-    """
-    if not db_tokens or ts is None:
-        return None
-    ts_ms = int(ts.timestamp() * 1000)
-    best_idx = -1
-    best_delta = 5000  # max 5s tolerance
-    for i, tok in enumerate(db_tokens):
-        if i in used:
-            continue
-        delta = abs(tok.gmt_create_ms - ts_ms)
-        if delta < best_delta:
-            best_delta = delta
-            best_idx = i
-    if best_idx >= 0:
-        used.add(best_idx)
-        return db_tokens[best_idx]
-    return None
+# NOTE: QoderWork does not currently provide token usage in transcript (no message.usage)
+# and does not write to a local SQLite DB. Token/usage data will be available once the
+# QoderWork team adds message.usage support. The get_usage() function below is kept so
+# that when message.usage becomes available, tokens will be captured automatically.
 
 # --- Paths ---
-STATE_DIR = Path.home() / ".qoder" / "state"
+STATE_DIR = Path.home() / ".qoderwork" / "state"
 LOG_FILE = STATE_DIR / "langfuse_hook.log"
 STATE_FILE = STATE_DIR / "langfuse_state.json"
 LOCK_FILE = STATE_DIR / "langfuse_state.lock"
@@ -127,9 +40,9 @@ def _opt(name: str) -> str:
     """Read a configuration value from environment variables."""
     return os.environ.get(name) or ""
 
-DEBUG = _opt("QD_LANGFUSE_DEBUG").lower() != "false"
+DEBUG = _opt("LANGFUSE_DEBUG").lower() != "false"
 try:
-    MAX_CHARS = int(_opt("QD_LANGFUSE_MAX_CHARS") or "800000")
+    MAX_CHARS = int(_opt("LANGFUSE_MAX_CHARS") or "800000")
 except ValueError:
     MAX_CHARS = 800000
 
@@ -142,7 +55,7 @@ def _get_logger() -> Optional[logging.Logger]:
         return _logger
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
-        lg = logging.getLogger("qoder_langfuse_hook")
+        lg = logging.getLogger("qoderwork_langfuse_hook")
         lg.setLevel(logging.DEBUG if DEBUG else logging.INFO)
         if not lg.handlers:
             h = RotatingFileHandler(str(LOG_FILE), maxBytes=5_000_000, backupCount=3)
@@ -196,7 +109,6 @@ class FileLock:
         try:
             import fcntl  # Unix only
         except ImportError:
-            # No fcntl available (e.g. Windows) — proceed without lock.
             return self
         deadline = time.time() + self.timeout_s
         try:
@@ -212,8 +124,6 @@ class FileLock:
                         )
                     time.sleep(0.05)
         except BaseException:
-            # __exit__ is not called when __enter__ raises — close the fh
-            # we just opened so it doesn't leak.
             try:
                 self._fh.close()
             except Exception:
@@ -241,7 +151,6 @@ def load_state() -> Dict[str, Any]:
 
 def save_state(state: Dict[str, Any]) -> None:
     try:
-        # Drop session entries older than 30 days to keep the file bounded.
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         for k in list(state.keys()):
             entry = state.get(k)
@@ -264,14 +173,13 @@ def save_state(state: Dict[str, Any]) -> None:
         debug(f"save_state failed: {e}")
 
 def state_key(session_id: str, transcript_path: str) -> str:
-    # stable key even if session_id collides
     raw = f"{session_id}::{transcript_path}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 # ----------------- Hook payload -----------------
 def read_hook_payload() -> Dict[str, Any]:
     """
-    Qoder hooks pass a JSON payload on stdin.
+    QoderWork hooks pass a JSON payload on stdin.
     This script tolerates missing/empty stdin by returning {}.
     """
     try:
@@ -306,16 +214,6 @@ class HookContext:
     org_name: Optional[str] = None
 
 def extract_hook_context(payload: Dict[str, Any]) -> HookContext:
-    """Extract session, transcript, and context from the Qoder Stop hook payload.
-
-    CLI payload fields:
-      session_id, transcript_path, cwd, hook_event_name,
-      permission_mode, stop_hook_active, last_assistant_message
-
-    Desktop payload adds:
-      extra.branch, extra.email, extra.repo,
-      extra.user.{email, name, uid, org_id, org_name}
-    """
     ctx = HookContext()
     ctx.session_id = payload.get("session_id")
     ctx.hook_event = payload.get("hook_event_name")
@@ -326,10 +224,6 @@ def extract_hook_context(payload: Dict[str, Any]) -> HookContext:
     if ctx.hook_event and ctx.hook_event not in ("Stop", "SubagentStop"):
         warn(f"unexpected hook_event_name: {ctx.hook_event}")
 
-    # SubagentStop: use agent_transcript_path (subagent's own transcript),
-    # NOT transcript_path (main agent's transcript — reading it would consume
-    # the main agent's offset and cause the Stop hook to miss data).
-    # Desktop SubagentStop may not provide agent_transcript_path — skip gracefully.
     if ctx.hook_event == "SubagentStop":
         transcript = payload.get("agent_transcript_path")
         if not transcript:
@@ -374,7 +268,6 @@ def get_content(msg: Dict[str, Any]) -> Any:
     return msg.get("content")
 
 def get_role(msg: Dict[str, Any]) -> Optional[str]:
-    # Qoder transcript lines commonly have type=user/assistant OR message.role
     t = msg.get("type")
     if t in ("user", "assistant"):
         return t
@@ -433,7 +326,6 @@ def truncate_text(s: str, max_chars: int = MAX_CHARS) -> Tuple[str, Dict[str, An
     return head, {"truncated": True, "orig_len": orig_len, "kept_len": len(head), "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest()}
 
 def get_model(msg: Dict[str, Any]) -> str:
-    """Extract model from JSONL message. Returns the raw value (e.g. 'lite')."""
     m = msg.get("message")
     if isinstance(m, dict):
         v = m.get("model")
@@ -442,7 +334,6 @@ def get_model(msg: Dict[str, Any]) -> str:
     return ""
 
 def get_usage(msg: Dict[str, Any]) -> Optional[Dict[str, int]]:
-    """Extract token usage from an assistant message, if present."""
     m = msg.get("message")
     if not isinstance(m, dict):
         return None
@@ -470,7 +361,6 @@ def get_message_id(msg: Dict[str, Any]) -> Optional[str]:
     return None
 
 def parse_ts(value: Any) -> Optional[datetime]:
-    """Parse a Qoder jsonl row timestamp (ISO 8601 with trailing Z)."""
     if isinstance(value, dict):
         value = value.get("timestamp")
     if not isinstance(value, str) or not value:
@@ -504,17 +394,12 @@ def write_session_state(global_state: Dict[str, Any], key: str, ss: SessionState
     }
 
 def read_new_jsonl(transcript_path: Path, ss: SessionState) -> Tuple[List[Dict[str, Any]], SessionState]:
-    """
-    Reads only new bytes since ss.offset. Keeps ss.buffer for partial last line.
-    Returns parsed JSON lines (best-effort) and updated state.
-    """
     if not transcript_path.exists():
         return [], ss
 
     try:
         file_size = transcript_path.stat().st_size
         if file_size < ss.offset:
-            # Transcript was rotated or truncated — restart from the beginning.
             debug(f"transcript shrank ({file_size} < {ss.offset}); restarting")
             ss.offset = 0
             ss.buffer = ""
@@ -536,7 +421,6 @@ def read_new_jsonl(transcript_path: Path, ss: SessionState) -> Tuple[List[Dict[s
 
     combined = ss.buffer + text
     lines = combined.split("\n")
-    # last element may be incomplete
     ss.buffer = lines[-1]
     ss.offset = new_offset
 
@@ -560,12 +444,6 @@ class Turn:
     tool_results_by_id: Dict[str, Any]
 
 def _merge_assistant_content(existing: Dict[str, Any], new_row: Dict[str, Any]) -> Dict[str, Any]:
-    """Merge content blocks from a new row into an existing assistant message.
-
-    Qoder writes each content block (thinking, text, tool_use) as a separate
-    JSONL row sharing the same message.id.  We accumulate all blocks into a
-    single message so that tool_use blocks are not lost.
-    """
     merged = dict(existing)
     old_content = get_content(merged)
     new_content = get_content(new_row)
@@ -575,43 +453,30 @@ def _merge_assistant_content(existing: Dict[str, Any], new_row: Dict[str, Any]) 
     if not isinstance(new_content, list):
         new_content = [new_content] if new_content else []
 
-    # Append new blocks
     combined = list(old_content) + list(new_content)
     if "message" in merged and isinstance(merged["message"], dict):
         merged["message"] = dict(merged["message"])
         merged["message"]["content"] = combined
-        # Carry over usage, model, stop_reason from later rows (typically
-        # the last row of a message.id group has stop_reason + usage).
         new_msg = new_row.get("message")
         if isinstance(new_msg, dict):
             for key in ("usage", "model", "stop_reason"):
                 val = new_msg.get(key)
                 if val is not None:
                     merged["message"][key] = val
-    # Keep first row's timestamp as start; track latest as end_timestamp
     if "timestamp" in new_row:
         merged["end_timestamp"] = new_row["timestamp"]
     return merged
 
 def build_turns(messages: List[Dict[str, Any]]) -> List[Turn]:
-    """
-    Groups incremental transcript rows into turns:
-    user (non-tool-result) -> assistant messages -> (tool_result rows, possibly interleaved)
-
-    Qoder writes each content block as a separate JSONL row with the same
-    message.id, so rows sharing an id are MERGED (content blocks accumulated)
-    rather than overwritten.
-    """
     turns: List[Turn] = []
     current_user: Optional[Dict[str, Any]] = None
 
-    # assistant messages for current turn:
-    assistant_order: List[str] = []             # message ids in order of first appearance (or synthetic)
-    assistant_latest: Dict[str, Dict[str, Any]] = {}  # id -> merged msg
-    noid_group: int = 0                         # counter for grouping consecutive no-id assistant rows
-    last_was_noid_assistant: bool = False        # track if previous row was a no-id assistant
+    assistant_order: List[str] = []
+    assistant_latest: Dict[str, Dict[str, Any]] = {}
+    noid_group: int = 0
+    last_was_noid_assistant: bool = False
 
-    tool_results_by_id: Dict[str, Any] = {}     # tool_use_id -> content
+    tool_results_by_id: Dict[str, Any] = {}
 
     def flush_turn():
         nonlocal current_user, assistant_order, assistant_latest, tool_results_by_id, turns
@@ -621,7 +486,6 @@ def build_turns(messages: List[Dict[str, Any]]) -> List[Turn]:
             warn("turn has user message but no assistant messages, skipping")
             return
         assistants = [assistant_latest[mid] for mid in assistant_order if mid in assistant_latest]
-        # Check for tool_use blocks that have no matching tool_result
         for am in assistants:
             for tu in iter_tool_uses(get_content(am)):
                 tid = tu.get("id")
@@ -632,7 +496,6 @@ def build_turns(messages: List[Dict[str, Any]]) -> List[Turn]:
     for msg in messages:
         role = get_role(msg)
 
-        # tool_result rows show up as role=user with content blocks of type tool_result
         if is_tool_result(msg):
             last_was_noid_assistant = False
             row_ts = msg.get("timestamp")
@@ -644,10 +507,8 @@ def build_turns(messages: List[Dict[str, Any]]) -> List[Turn]:
 
         if role == "user":
             last_was_noid_assistant = False
-            # new user message -> finalize previous turn
             flush_turn()
 
-            # start a new turn
             current_user = msg
             assistant_order = []
             assistant_latest = {}
@@ -657,12 +518,10 @@ def build_turns(messages: List[Dict[str, Any]]) -> List[Turn]:
 
         if role == "assistant":
             if current_user is None:
-                # ignore assistant rows until we see a user message
                 continue
 
             mid = get_message_id(msg)
             if mid is None:
-                # No message.id (Desktop): merge consecutive rows into same group
                 if not last_was_noid_assistant:
                     noid_group += 1
                 mid = f"noid:{noid_group}"
@@ -677,19 +536,11 @@ def build_turns(messages: List[Dict[str, Any]]) -> List[Turn]:
                 assistant_latest[mid] = _merge_assistant_content(assistant_latest[mid], msg)
             continue
 
-        # Only reset noid merge on role boundaries (user, tool_result),
-        # not on progress/session_meta/other non-message rows.
-        # last_was_noid_assistant is already reset in the user/tool_result blocks above.
-
-        # ignore unknown rows
-
-    # flush last
     flush_turn()
     return turns
 
 # ----------------- Langfuse emit -----------------
 def _to_ns(ts: Optional[datetime]) -> Optional[int]:
-    """Convert a datetime to OTel-style nanoseconds since epoch."""
     if ts is None:
         return None
     return int(ts.timestamp() * 1_000_000_000)
@@ -699,17 +550,6 @@ def _start_backdated(langfuse: Langfuse, *, name: str, as_type: str,
                      start_time: Optional[datetime],
                      parent_otel_span: Any = None,
                      **obs_kwargs: Any) -> Any:
-    """Create a Langfuse observation with an explicit OTel start_time.
-
-    Bypasses langfuse.start_observation() (which has no start_time kwarg in
-    SDK 4.x) by talking to the underlying OTel tracer directly and then
-    wrapping the resulting span with the Langfuse observation type.
-
-    Depends on SDK 4.x internals: langfuse._otel_tracer and
-    langfuse._create_observation_from_otel_span. If a future SDK version
-    renames or removes these, raise a clear error instead of letting an
-    AttributeError get swallowed by the broad emit_turn handler.
-    """
     if not hasattr(langfuse, "_otel_tracer") or not hasattr(langfuse, "_create_observation_from_otel_span"):
         try:
             sdk_version = getattr(__import__("langfuse"), "__version__", "unknown")
@@ -733,7 +573,7 @@ def _start_backdated(langfuse: Langfuse, *, name: str, as_type: str,
     )
 
 
-def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, user_id: Optional[str] = None, tags: Optional[List[str]] = None, db_tokens: Optional[List[TokenInfo]] = None, db_used: Optional[set] = None) -> None:
+def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, user_id: Optional[str] = None, tags: Optional[List[str]] = None) -> None:
     user_text_raw = extract_text(get_content(turn.user_msg))
     user_text, user_text_meta = truncate_text(user_text_raw)
 
@@ -742,7 +582,6 @@ def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, u
 
     user_ts = parse_ts(turn.user_msg)
     last_assistant_ts = parse_ts({"timestamp": last_assistant.get("end_timestamp")}) if last_assistant.get("end_timestamp") else parse_ts(last_assistant)
-    # Pick a turn end_time: latest among final assistant message or any tool result
     candidate_end_ts = [t for t in [last_assistant_ts] if t is not None]
     for tr in turn.tool_results_by_id.values():
         t = parse_ts(tr)
@@ -751,19 +590,18 @@ def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, u
     turn_end_ts = max(candidate_end_ts) if candidate_end_ts else None
 
     is_subagent = ctx.hook_event == "SubagentStop"
-    trace_prefix = f"Qoder Subagent ({ctx.agent_type})" if is_subagent and ctx.agent_type else "Qoder"
-    trace_label = f"{trace_prefix} - Turn {turn_num}"
+    trace_label = f"QoderWork - Subagent Turn {turn_num}" if is_subagent else f"QoderWork - Turn {turn_num}"
 
     pa_kwargs: Dict[str, Any] = {
         "session_id": ctx.session_id,
         "trace_name": trace_label,
-        "tags": tags or ["qoder"],
+        "tags": tags or ["qoderwork"],
     }
     if user_id:
         pa_kwargs["user_id"] = user_id
 
     trace_metadata: Dict[str, Any] = {
-        "source": "qoder-subagent" if is_subagent else "qoder",
+        "source": "qoderwork-subagent" if is_subagent else "qoderwork",
         "session_id": ctx.session_id,
         "turn_number": turn_num,
         "transcript_path": str(ctx.transcript_path),
@@ -798,11 +636,8 @@ def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, u
         )
         parent_otel_span = trace_span._otel_span
 
-        # Iterate each assistant message: emit generation, then its tool_use children.
-        # prev_ts = the moment the next generation could have started (= when the previous
-        # batch of tool results all returned, or the original user message timestamp).
         prev_ts = user_ts
-        prev_tool_results: List[Dict[str, Any]] = []  # populated after each batch, surfaced as next gen's input
+        prev_tool_results: List[Dict[str, Any]] = []
 
         for idx, am in enumerate(turn.assistant_msgs):
             am_ts = parse_ts(am)
@@ -812,8 +647,6 @@ def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, u
             model = get_model(am)
             tool_uses = iter_tool_uses(get_content(am))
 
-            # Build generation input: user message for first generation, otherwise tool results from
-            # the prior batch (best partial reconstruction of the prompt context).
             if idx == 0:
                 gen_input: Any = {"role": "user", "content": user_text}
             elif prev_tool_results:
@@ -821,9 +654,6 @@ def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, u
             else:
                 gen_input = None
 
-            # Build generation output: include both the text response and any tool calls the LLM
-            # decided to make. Most assistant messages in tool-using turns are tool-call-only, so
-            # without tool_calls in the output, the observation looks empty.
             gen_tool_calls = []
             for tu in tool_uses:
                 tu_input = tu.get("input")
@@ -843,13 +673,8 @@ def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, u
             if gen_tool_calls:
                 gen_output["tool_calls"] = gen_tool_calls
 
-            # Enrich from DB: match by timestamp proximity
-            db_token = match_db_token(db_tokens or [], am_ts, db_used) if db_used is not None else None
-            if db_token and db_token.model_key and not model:
-                model = db_token.model_key
-
             if not model:
-                warn(f"turn {turn_num} generation {idx+1}: no model in transcript or DB")
+                warn(f"turn {turn_num} generation {idx+1}: no model in transcript")
             if not am_ts:
                 warn(f"turn {turn_num} generation {idx+1}: missing timestamp")
             if not am_text and not gen_tool_calls:
@@ -860,8 +685,6 @@ def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, u
                 "assistant_text": am_text_meta,
                 "tool_count": len(tool_uses),
             }
-            if db_token:
-                gen_meta["db_model_key"] = db_token.model_key
 
             gen_kwargs: Dict[str, Any] = dict(
                 model=model or "unknown",
@@ -870,24 +693,18 @@ def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, u
                 metadata=gen_meta,
             )
             usage_details = get_usage(am)
-            if usage_details is None and db_token:
-                usage_details = {"input": db_token.input_tokens, "output": db_token.output_tokens}
-                if db_token.cached_tokens > 0:
-                    usage_details["cache_read_input_tokens"] = db_token.cached_tokens
             if usage_details is not None:
                 gen_kwargs["usage_details"] = usage_details
 
             gen_span = _start_backdated(
                 langfuse,
-                name=f"Qoder Generation {idx + 1}",
+                name=f"QoderWork Generation {idx + 1}",
                 as_type="generation",
                 start_time=prev_ts or am_ts,
                 parent_otel_span=parent_otel_span,
                 **gen_kwargs,
             )
 
-            # Tool observations: nested under this generation. Each starts when the assistant
-            # emitted the tool_use (am_ts) and ends when its tool_result row arrived.
             batch_result_ts: List[datetime] = []
             batch_tool_results: List[Dict[str, Any]] = []
             for tu in tool_uses:
@@ -933,15 +750,11 @@ def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, u
                     "output": out_trunc,
                 })
 
-            # End the generation AFTER its tools so the timeline cleanly contains them.
-            # Priority: latest tool_result ts > am_end_ts (last content block) > am_ts (first block)
             gen_end_ts = max(batch_result_ts) if batch_result_ts else (am_end_ts or am_ts)
             gen_span.end(end_time=_to_ns(gen_end_ts or am_ts or prev_ts))
 
-            # Carry this batch's results into the next generation's input.
             prev_tool_results = batch_tool_results
 
-            # Advance prev_ts: next generation can only start after this batch's tool results returned.
             if batch_result_ts:
                 prev_ts = max(batch_result_ts)
             elif am_end_ts is not None:
@@ -953,8 +766,7 @@ def emit_turn(langfuse: Langfuse, ctx: HookContext, turn_num: int, turn: Turn, u
         trace_span.end(end_time=_to_ns(turn_end_ts or last_assistant_ts or user_ts))
 
 def resolve_user_id(ctx: HookContext) -> Optional[str]:
-    """Priority: env var > payload extra.user.name > OS username."""
-    uid = _opt("QD_LANGFUSE_USER_ID")
+    uid = _opt("LANGFUSE_USER_ID")
     if uid:
         return uid
     if ctx.user_name:
@@ -974,9 +786,9 @@ def main() -> int:
     start = time.time()
     debug("Hook started")
 
-    public_key = _opt("LANGFUSE_PUBLIC_KEY") or _opt("QD_LANGFUSE_PUBLIC_KEY")
-    secret_key = _opt("LANGFUSE_SECRET_KEY") or _opt("QD_LANGFUSE_SECRET_KEY")
-    host = _opt("LANGFUSE_BASE_URL") or _opt("QD_LANGFUSE_BASE_URL") or "https://us.cloud.langfuse.com"
+    public_key = _opt("LANGFUSE_PUBLIC_KEY")
+    secret_key = _opt("LANGFUSE_SECRET_KEY")
+    host = _opt("LANGFUSE_BASE_URL") or "https://us.cloud.langfuse.com"
 
     if not public_key or not secret_key:
         warn("LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY not set, skipping")
@@ -998,54 +810,65 @@ def main() -> int:
         return 0
 
     user_id = resolve_user_id(ctx)
-    tags_raw = _opt("QD_LANGFUSE_TAGS") or "qoder"
+    tags_raw = _opt("LANGFUSE_TAGS") or "qoderwork"
     tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+    debug(f"Langfuse config: host={host}, public_key={public_key[:12]}...")
 
     langfuse = None
     try:
         langfuse = Langfuse(public_key=public_key, secret_key=secret_key, host=host)
-    except Exception:
+    except Exception as e:
+        warn(f"Langfuse init failed: {e}")
         return 0
 
+    # Use transcript directory for state persistence — QoderWork hooks run
+    # inside a Linux VM where ~/.qoderwork/state/ is ephemeral. The transcript
+    # directory is on a host-mounted volume that survives VM restarts.
+    per_session_state_file = ctx.transcript_path.parent / ".langfuse_state.json"
+    per_session_lock_file = ctx.transcript_path.parent / ".langfuse_state.lock"
+
     try:
-        with FileLock(LOCK_FILE):
-            state = load_state()
+        with FileLock(per_session_lock_file):
+            state = {}
+            try:
+                if per_session_state_file.exists():
+                    state = json.loads(per_session_state_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
             key = state_key(ctx.session_id, str(ctx.transcript_path))
             ss = load_session_state(state, key)
 
+            def _save():
+                write_session_state(state, key, ss)
+                try:
+                    tmp = per_session_state_file.with_suffix(".tmp")
+                    tmp.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+                    os.replace(tmp, per_session_state_file)
+                except Exception as e:
+                    debug(f"save per-session state failed: {e}")
+
             msgs, ss = read_new_jsonl(ctx.transcript_path, ss)
             if not msgs:
-                write_session_state(state, key, ss)
-                save_state(state)
+                _save()
                 return 0
 
             turns = build_turns(msgs)
             if not turns:
-                write_session_state(state, key, ss)
-                save_state(state)
+                _save()
                 return 0
 
-            # Query DB for token/model enrichment (best-effort)
-            db_tokens = query_session_tokens(ctx.session_id)
-            if db_tokens:
-                debug(f"DB enrichment: {len(db_tokens)} token records for session {ctx.session_id}")
-            else:
-                debug(f"No DB token data for session {ctx.session_id}")
-
-            # emit turns — db_used tracks which DB records have been consumed
             emitted = 0
-            db_used: set = set()
             for t in turns:
                 emitted += 1
                 turn_num = ss.turn_count + emitted
                 try:
-                    emit_turn(langfuse, ctx, turn_num, t, user_id=user_id, tags=tags, db_tokens=db_tokens or None, db_used=db_used)
+                    emit_turn(langfuse, ctx, turn_num, t, user_id=user_id, tags=tags)
                 except Exception as e:
                     info(f"emit_turn failed: {type(e).__name__}: {e}")
 
             ss.turn_count += emitted
-            write_session_state(state, key, ss)
-            save_state(state)
+            _save()
 
         dur = time.time() - start
         info(f"Processed {emitted} turns in {dur:.2f}s (session={ctx.session_id})")
@@ -1060,20 +883,25 @@ def main() -> int:
         return 0
 
     finally:
-        # Cap flush+shutdown at 5s so a slow/unreachable Langfuse can't stall Qoder.
         if langfuse is not None:
             try:
                 def _flush_and_shutdown():
                     try:
                         langfuse.flush()
-                    except Exception:
-                        pass
-                    langfuse.shutdown()
+                        debug("Langfuse flush succeeded")
+                    except Exception as e:
+                        warn(f"Langfuse flush failed: {e}")
+                    try:
+                        langfuse.shutdown()
+                    except Exception as e:
+                        debug(f"Langfuse shutdown error: {e}")
                 t = threading.Thread(target=_flush_and_shutdown, daemon=True)
                 t.start()
                 t.join(5.0)
-            except Exception:
-                pass
+                if t.is_alive():
+                    warn("Langfuse flush timed out (5s)")
+            except Exception as e:
+                warn(f"Langfuse cleanup failed: {e}")
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -45,12 +45,18 @@ const curlFetch = (url, options = {}) => {
     });
   } catch (e) {
     writeLogFile('WARN', `curlFetch ${method} ${url}: ${e.message}`);
-    return Promise.reject(new Error(`curl fetch failed: ${e.message}`));
+    return Promise.resolve({
+      status: 0,
+      ok: false,
+      text: () => Promise.resolve(''),
+      json: () => Promise.resolve({}),
+      headers: new Headers(),
+    });
   }
 };
 
 // Load env file as fallback when shell profile hasn't been sourced
-const ENV_FILE = join(homedir(), '.config', 'opencode', 'langfuse.env');
+const ENV_FILE = join(homedir(), '.config', 'agent-exporter-to-langfuse', 'opencode.env');
 try {
   const content = readFileSync(ENV_FILE, 'utf8');
   for (const line of content.split('\n')) {
@@ -60,9 +66,9 @@ try {
 } catch {}
 
 const env = (name) => process.env[name] || '';
-const MAX_CHARS = parseInt(env('OC_LANGFUSE_MAX_CHARS') || '800000', 10) || 800000;
-const DEBUG = env('OC_LANGFUSE_DEBUG').toLowerCase() !== 'false';
-const TAGS = (env('OC_LANGFUSE_TAGS') || 'opencode').split(',').map(t => t.trim()).filter(Boolean);
+const MAX_CHARS = parseInt(env('LANGFUSE_MAX_CHARS') || '800000', 10) || 800000;
+const DEBUG = env('LANGFUSE_DEBUG').toLowerCase() !== 'false';
+const TAGS = (env('LANGFUSE_TAGS') || 'opencode').split(',').map(t => t.trim()).filter(Boolean);
 
 const LOG_DIR = join(homedir(), '.config', 'opencode', 'logs', 'langfuse-exporter');
 let logDirReady = false;
@@ -100,7 +106,7 @@ const truncate = (s, max = MAX_CHARS) => {
 };
 
 const resolveUserId = () => {
-  const explicit = env('OC_LANGFUSE_USER_ID');
+  const explicit = env('LANGFUSE_USER_ID');
   if (explicit) return explicit;
   try { return userInfo().username; } catch {}
   return env('USER') || env('LOGNAME') || env('USERNAME') || undefined;
@@ -129,9 +135,9 @@ const LangfuseExporterPlugin = async (ctx) => {
 };
 
 const _initPlugin = async (ctx) => {
-  const publicKey = env('LANGFUSE_PUBLIC_KEY') || env('OC_LANGFUSE_PUBLIC_KEY');
-  const secretKey = env('LANGFUSE_SECRET_KEY') || env('OC_LANGFUSE_SECRET_KEY');
-  const baseUrl = env('LANGFUSE_BASE_URL') || env('OC_LANGFUSE_BASE_URL') || 'https://us.cloud.langfuse.com';
+  const publicKey = env('LANGFUSE_PUBLIC_KEY');
+  const secretKey = env('LANGFUSE_SECRET_KEY');
+  const baseUrl = env('LANGFUSE_BASE_URL') || 'https://us.cloud.langfuse.com';
 
   if (!publicKey || !secretKey) {
     await warn('LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY not set, plugin disabled');

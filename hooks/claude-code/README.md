@@ -24,10 +24,10 @@ Configure via `/plugin` → Configure options:
 | `LANGFUSE_SECRET_KEY` | Yes | Your Langfuse secret key (sk-lf-...). Stored in your OS keychain. |
 | `LANGFUSE_PUBLIC_KEY` | Yes | Your Langfuse public key (pk-lf-...). |
 | `LANGFUSE_BASE_URL` | Yes | `https://us.cloud.langfuse.com` (default), `https://cloud.langfuse.com` for EU, or your self-hosted URL. |
-| `CC_LANGFUSE_USER_ID` | No | User identifier for Langfuse traces. Defaults to OS account username if not set. |
-| `CC_LANGFUSE_TAGS` | No | Comma-separated tags for Langfuse traces (e.g. `claude-code,production`). Default `claude-code`. |
-| `CC_LANGFUSE_MAX_CHARS` | No | Maximum characters per content field. Default 800000 (≈200K tokens). |
-| `CC_LANGFUSE_DEBUG` | No | Verbose logging to `~/.claude/state/langfuse_hook.log`. Default `true`. Set `false` to disable. |
+| `LANGFUSE_USER_ID` | No | User identifier for Langfuse traces. Defaults to OS account username if not set. |
+| `LANGFUSE_TAGS` | No | Comma-separated tags for Langfuse traces (e.g. `claude-code,production`). Default `claude-code`. |
+| `LANGFUSE_MAX_CHARS` | No | Maximum characters per content field. Default 800000 (≈200K tokens). |
+| `LANGFUSE_DEBUG` | No | Verbose logging to `~/.claude/state/langfuse_hook.log`. Default `true`. Set `false` to disable. |
 
 Get keys from your Langfuse project settings → API Keys.
 
@@ -59,7 +59,7 @@ claude plugin uninstall langfuse
 
 ## Troubleshooting
 
-- **Nothing in Langfuse**: check `~/.claude/state/langfuse_hook.log` (enable `CC_LANGFUSE_DEBUG`).
+- **Nothing in Langfuse**: check `~/.claude/state/langfuse_hook.log` (enable `LANGFUSE_DEBUG`).
 - **Hook not firing**: confirm with `claude plugin list` that langfuse is enabled; restart Claude Code.
 - **uv errors**: ensure [uv](https://docs.astral.sh/uv/) is installed and available on your PATH.
 

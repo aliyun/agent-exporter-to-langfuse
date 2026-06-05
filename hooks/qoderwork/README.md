@@ -6,7 +6,7 @@ Trace every QoderWork session to [Langfuse](https://langfuse.com) — turns, gen
 
 ```bash
 git clone https://github.com/aliyun/agent-exporter-to-langfuse.git
-cd agent-exporter-to-langfuse/qoderwork
+cd agent-exporter-to-langfuse/hooks/qoderwork
 bash install.sh
 ```
 
@@ -28,10 +28,10 @@ The install script configures the required environment variables. Full variable 
 | `LANGFUSE_SECRET_KEY` | Yes | Your Langfuse secret key (set during install). |
 | `LANGFUSE_PUBLIC_KEY` | Yes | Your Langfuse public key (set during install). |
 | `LANGFUSE_BASE_URL` | Yes | Your Langfuse host URL (set during install). |
-| `QDW_LANGFUSE_USER_ID` | No | User identifier for Langfuse traces. Defaults to OS account username if not set. |
-| `QDW_LANGFUSE_TAGS` | No | Comma-separated tags for Langfuse traces (e.g. `qoderwork,production`). Default `qoderwork`. |
-| `QDW_LANGFUSE_MAX_CHARS` | No | Maximum characters per content field. Default 800000 (~200K tokens). |
-| `QDW_LANGFUSE_DEBUG` | No | Verbose logging to `~/.qoderwork/state/langfuse_hook.log`. Default `true`. Set `false` to disable. |
+| `LANGFUSE_USER_ID` | No | User identifier for Langfuse traces. Defaults to OS account username if not set. |
+| `LANGFUSE_TAGS` | No | Comma-separated tags for Langfuse traces (e.g. `qoderwork,production`). Default `qoderwork`. |
+| `LANGFUSE_MAX_CHARS` | No | Maximum characters per content field. Default 800000 (~200K tokens). |
+| `LANGFUSE_DEBUG` | No | Verbose logging to `~/.qoderwork/state/langfuse_hook.log`. Default `true`. Set `false` to disable. |
 
 Credentials are stored in a dedicated file `~/.qoderwork/langfuse.env`. The shell profile only adds a single `source` line, making it cleanly removable on uninstall.
 
@@ -74,14 +74,14 @@ QoderWork CLI and Desktop share the hooks configuration in `~/.qoderwork/setting
 | Token usage in transcript | Not available | Not available |
 | Session exists in SQLite DB | No | Yes |
 
-### Token & model enrichment (SQLite)
+### Token usage
 
-JSONL transcripts do not contain token usage data. The hook attempts to enrich traces by querying the QoderWork Desktop SQLite database:
+QoderWork does not currently provide token usage data:
 
-- **DB path**: `~/Library/Application Support/QoderWork/SharedClientCache/cache/db/local.db` (macOS)
-- **Table**: `chat_message`, filtered by `session_id` + `role = 'assistant'`
-- **Fields**: `prompt_tokens` / `completion_tokens` / `cached_tokens` from `token_info`, `model_key` from `model_info`
-- **Matching**: Approximate timestamp matching (5-second window); JSONL and DB timestamps typically differ by < 5ms
+- **Transcript**: No `message.usage` field in assistant messages
+- **SQLite DB**: Not accessible (DB resides on macOS host, outside the VM's filesystem mount)
+
+Token usage will be captured automatically once the QoderWork team adds `message.usage` to the transcript format. The hook code already supports reading `message.usage` when it becomes available.
 
 ### Linux VM architecture
 
@@ -93,7 +93,6 @@ QoderWork Desktop executes all hook commands inside a Linux VM (Ubuntu aarch64, 
 | Shell | `/bin/zsh` | `/usr/bin/bash` |
 | Python venv | macOS arm64 binaries | Linux aarch64 binaries |
 | Environment variables | From shell profile / LaunchAgent | Must be sourced from `langfuse.env` by entrypoint |
-| SQLite DB access | Direct | Not available (DB is on macOS host, outside VM mount) |
 
 The `langfuse-entrypoint.sh` wrapper script handles these differences:
 
@@ -109,9 +108,9 @@ Desktop fires `SubagentStop` hooks but the payload contains only `transcript_pat
 
 The main transcript records subagent invocations as `Agent` tool_use/tool_result pairs. The tool_result contains the subagent's **final text output only** — no structured tool call data. So the subagent appears in Langfuse as a single `Tool: Agent` span with its final output and duration, but its internal LLM calls, tool chain, and token consumption are not captured.
 
-**QoderWork Desktop: no token usage or model in transcript**
+**QoderWork: no token usage in transcript**
 
-Desktop transcript assistant messages do not include `message.usage` or `message.model`. Token data is normally enriched from the SQLite database, but the DB resides on the macOS host outside the VM's filesystem mount, making DB enrichment unavailable. As a result, model shows as `"unknown"` and token usage is not captured.
+Transcript assistant messages do not include `message.usage` or `message.model`. Token usage is not captured. We are waiting for the QoderWork team to add `message.usage` support.
 
 **QoderWork Desktop: content blocks split across rows without message.id**
 
@@ -159,7 +158,7 @@ QoderWork executes hook commands inside a Linux VM. A wrapper script (`langfuse-
 ## Uninstall
 
 ```bash
-cd agent-exporter-to-langfuse/qoderwork
+cd agent-exporter-to-langfuse/hooks/qoderwork
 bash uninstall.sh
 ```
 
@@ -172,7 +171,7 @@ The uninstall script removes:
 
 ## Troubleshooting
 
-- **Nothing in Langfuse**: check `~/.qoderwork/state/langfuse_hook.log` (set `QDW_LANGFUSE_DEBUG=true`).
+- **Nothing in Langfuse**: check `~/.qoderwork/state/langfuse_hook.log` (set `LANGFUSE_DEBUG=true`).
 - **Hook not firing**: verify the `Stop` hook entry exists in `~/.qoderwork/settings.json`; restart QoderWork.
 - **uv errors**: ensure [uv](https://docs.astral.sh/uv/) is installed and available on your PATH.
 

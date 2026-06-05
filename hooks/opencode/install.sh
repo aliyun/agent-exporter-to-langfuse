@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SOURCE_PLUGIN="$SCRIPT_DIR/hooks/langfuse-exporter.mjs"
 PLUGIN_DEST="$OC_PLUGINS_DIR/langfuse-exporter.mjs"
 PLUGIN_REF="./plugins/langfuse-exporter.mjs"
+# Shared env directory
+LANGFUSE_PROFILE_DIR="$HOME/.config/agent-exporter-to-langfuse"
 # Shell profile: zshenv for zsh, ~/.profile for others (bash/sh on Linux)
 if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
     SHELL_RC="$HOME/.zshenv"
@@ -29,6 +31,24 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 prompt_input() { echo -ne "${CYAN}$1${NC}"; }
 
+# --- Parse arguments ---
+LANGFUSE_SECRET_KEY="${LANGFUSE_SECRET_KEY:-}"
+LANGFUSE_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}"
+LANGFUSE_BASE_URL="${LANGFUSE_BASE_URL:-}"
+LANGFUSE_USER_ID="${LANGFUSE_USER_ID:-}"
+LANGFUSE_TAGS="${LANGFUSE_TAGS:-}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --secret-key)  LANGFUSE_SECRET_KEY="$2"; shift 2 ;;
+        --public-key)  LANGFUSE_PUBLIC_KEY="$2"; shift 2 ;;
+        --base-url)    LANGFUSE_BASE_URL="$2"; shift 2 ;;
+        --user-id)     LANGFUSE_USER_ID="$2"; shift 2 ;;
+        --tags)        LANGFUSE_TAGS="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+
 # --- 1. Check prerequisites ---
 if ! command -v npm &>/dev/null; then
     error "npm is not installed. Install Node.js first: https://nodejs.org/"
@@ -47,76 +67,70 @@ if [ ! -d "$OC_CONFIG_DIR" ]; then
 fi
 
 # --- 2. Collect Langfuse credentials ---
+LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/opencode.env"
 
-# Load existing env file so previous values become defaults
-LANGFUSE_ENV_FILE="$OC_CONFIG_DIR/langfuse.env"
-if [ -f "$LANGFUSE_ENV_FILE" ]; then
-    # shellcheck disable=SC1090
-    . "$LANGFUSE_ENV_FILE"
-fi
-
-echo ""
-echo "=== Langfuse Configuration ==="
-echo "Enter your Langfuse credentials (get them from Langfuse project settings → API Keys)."
-echo ""
-
-DEFAULT_BASE_URL="${LANGFUSE_BASE_URL:-https://us.cloud.langfuse.com}"
-DEFAULT_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}"
-DEFAULT_SECRET_KEY="${LANGFUSE_SECRET_KEY:-}"
-
-if [ -n "$DEFAULT_BASE_URL" ]; then
-    prompt_input "Langfuse Base URL [$DEFAULT_BASE_URL]: "
+if [ -n "$LANGFUSE_SECRET_KEY" ] && [ -n "$LANGFUSE_PUBLIC_KEY" ] && [ -n "$LANGFUSE_BASE_URL" ]; then
+    :
 else
-    prompt_input "Langfuse Base URL: "
+    if [ -f "$LANGFUSE_ENV_FILE" ]; then
+        # shellcheck disable=SC1090
+        . "$LANGFUSE_ENV_FILE"
+    fi
+
+    echo ""
+    echo "=== Langfuse Configuration ==="
+    echo "Enter your Langfuse credentials (get them from Langfuse project settings → API Keys)."
+    echo ""
+
+    DEFAULT_BASE_URL="${LANGFUSE_BASE_URL:-https://us.cloud.langfuse.com}"
+    DEFAULT_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}"
+    DEFAULT_SECRET_KEY="${LANGFUSE_SECRET_KEY:-}"
+
+    if [ -n "$DEFAULT_BASE_URL" ]; then
+        prompt_input "Langfuse Base URL [$DEFAULT_BASE_URL]: "
+    else
+        prompt_input "Langfuse Base URL: "
+    fi
+    read -r INPUT_BASE_URL
+    LANGFUSE_BASE_URL="${INPUT_BASE_URL:-$DEFAULT_BASE_URL}"
+
+    if [ -n "$DEFAULT_PUBLIC_KEY" ]; then
+        prompt_input "Langfuse Public Key [${DEFAULT_PUBLIC_KEY:0:12}...]: "
+    else
+        prompt_input "Langfuse Public Key (pk-lf-...): "
+    fi
+    read -r INPUT_PUBLIC_KEY
+    LANGFUSE_PUBLIC_KEY="${INPUT_PUBLIC_KEY:-$DEFAULT_PUBLIC_KEY}"
+
+    if [ -n "$DEFAULT_SECRET_KEY" ]; then
+        prompt_input "Langfuse Secret Key [${DEFAULT_SECRET_KEY:0:12}...]: "
+    else
+        prompt_input "Langfuse Secret Key (sk-lf-...): "
+    fi
+    read -r INPUT_SECRET_KEY
+    LANGFUSE_SECRET_KEY="${INPUT_SECRET_KEY:-$DEFAULT_SECRET_KEY}"
+
+    if [ -z "$LANGFUSE_PUBLIC_KEY" ] || [ -z "$LANGFUSE_SECRET_KEY" ]; then
+        error "Public Key and Secret Key are required."
+        exit 1
+    fi
+
+    if [ -n "$LANGFUSE_USER_ID" ]; then
+        prompt_input "Langfuse User ID [$LANGFUSE_USER_ID]: "
+    else
+        prompt_input "Langfuse User ID [default: OS username]: "
+    fi
+    read -r INPUT_USER_ID
+    LANGFUSE_USER_ID="${INPUT_USER_ID:-$LANGFUSE_USER_ID}"
+
+    if [ -n "$LANGFUSE_TAGS" ]; then
+        prompt_input "Extra Tags [$LANGFUSE_TAGS]: "
+    else
+        prompt_input "Extra Tags (e.g. team:olap,env:prod) [none]: "
+    fi
+    read -r INPUT_TAGS
+    LANGFUSE_TAGS="${INPUT_TAGS:-$LANGFUSE_TAGS}"
 fi
-read -r INPUT_BASE_URL
-LANGFUSE_BASE_URL="${INPUT_BASE_URL:-$DEFAULT_BASE_URL}"
-
-if [ -n "$DEFAULT_PUBLIC_KEY" ]; then
-    prompt_input "Langfuse Public Key [${DEFAULT_PUBLIC_KEY:0:12}...]: "
-else
-    prompt_input "Langfuse Public Key (pk-lf-...): "
-fi
-read -r INPUT_PUBLIC_KEY
-LANGFUSE_PUBLIC_KEY="${INPUT_PUBLIC_KEY:-$DEFAULT_PUBLIC_KEY}"
-
-if [ -n "$DEFAULT_SECRET_KEY" ]; then
-    prompt_input "Langfuse Secret Key [${DEFAULT_SECRET_KEY:0:12}...]: "
-else
-    prompt_input "Langfuse Secret Key (sk-lf-...): "
-fi
-read -r INPUT_SECRET_KEY
-LANGFUSE_SECRET_KEY="${INPUT_SECRET_KEY:-$DEFAULT_SECRET_KEY}"
-
-if [ -z "$LANGFUSE_PUBLIC_KEY" ] || [ -z "$LANGFUSE_SECRET_KEY" ]; then
-    error "Public Key and Secret Key are required."
-    exit 1
-fi
-
-echo ""
-echo "=== Optional Settings (press Enter to skip) ==="
-echo ""
-
-DEFAULT_USER_ID="${OC_LANGFUSE_USER_ID:-}"
-DEFAULT_TAGS="${OC_LANGFUSE_TAGS:-opencode}"
-DEFAULT_MAX_CHARS="${OC_LANGFUSE_MAX_CHARS:-800000}"
-DEFAULT_DEBUG="${OC_LANGFUSE_DEBUG:-true}"
-
-prompt_input "User ID [${DEFAULT_USER_ID:-auto (OS username)}]: "
-read -r INPUT_USER_ID
-OC_LANGFUSE_USER_ID="${INPUT_USER_ID:-$DEFAULT_USER_ID}"
-
-prompt_input "Tags, comma-separated [$DEFAULT_TAGS]: "
-read -r INPUT_TAGS
-OC_LANGFUSE_TAGS="${INPUT_TAGS:-$DEFAULT_TAGS}"
-
-prompt_input "Max content chars [$DEFAULT_MAX_CHARS]: "
-read -r INPUT_MAX_CHARS
-OC_LANGFUSE_MAX_CHARS="${INPUT_MAX_CHARS:-$DEFAULT_MAX_CHARS}"
-
-prompt_input "Debug logging (true/false) [$DEFAULT_DEBUG]: "
-read -r INPUT_DEBUG
-OC_LANGFUSE_DEBUG="${INPUT_DEBUG:-$DEFAULT_DEBUG}"
 
 echo ""
 
@@ -175,30 +189,34 @@ else:
     esac
 done
 
-# --- 6. Set environment variables (shell + GUI) ---
-SOURCE_LINE="[ -f \"$LANGFUSE_ENV_FILE\" ] && . \"$LANGFUSE_ENV_FILE\""
+# --- 6. Write env file (standalone) ---
+# Build final tags: ensure agent name is included exactly once
+case ",$LANGFUSE_TAGS," in
+    *,opencode,*) FINAL_TAGS="$LANGFUSE_TAGS" ;;
+    *) FINAL_TAGS="opencode${LANGFUSE_TAGS:+,$LANGFUSE_TAGS}" ;;
+esac
 
-# 6a. Write dedicated env file
+mkdir -p "$LANGFUSE_PROFILE_DIR"
 {
     echo "export LANGFUSE_BASE_URL=\"$LANGFUSE_BASE_URL\""
     echo "export LANGFUSE_PUBLIC_KEY=\"$LANGFUSE_PUBLIC_KEY\""
     echo "export LANGFUSE_SECRET_KEY=\"$LANGFUSE_SECRET_KEY\""
-    [ -n "$OC_LANGFUSE_USER_ID" ]   && echo "export OC_LANGFUSE_USER_ID=\"$OC_LANGFUSE_USER_ID\""
-    [ "$OC_LANGFUSE_TAGS" != "opencode" ]    && echo "export OC_LANGFUSE_TAGS=\"$OC_LANGFUSE_TAGS\""
-    [ "$OC_LANGFUSE_MAX_CHARS" != "800000" ] && echo "export OC_LANGFUSE_MAX_CHARS=\"$OC_LANGFUSE_MAX_CHARS\""
-    [ "$OC_LANGFUSE_DEBUG" = "false" ]    && echo "export OC_LANGFUSE_DEBUG=\"false\""
+    [ -n "$LANGFUSE_USER_ID" ] && echo "export LANGFUSE_USER_ID=\"$LANGFUSE_USER_ID\""
+    echo "export LANGFUSE_TAGS=\"$FINAL_TAGS\""
 } > "$LANGFUSE_ENV_FILE"
 info "Env vars written to $LANGFUSE_ENV_FILE."
 
-# 6b. Add source line to shell profile (idempotent)
-if ! grep -qF "opencode/langfuse.env" "$SHELL_RC" 2>/dev/null; then
-    printf '\n# Langfuse (OpenCode)\n%s\n' "$SOURCE_LINE" >> "$SHELL_RC"
-    info "Added source line to $SHELL_RC."
+# --- 7. Add profile.d loader to shell profile (one-time, shared across all agents) ---
+LOADER_LINE='for f in "$HOME"/.config/agent-exporter-to-langfuse/*.env; do [ -f "$f" ] && . "$f"; done'
+
+if ! grep -qF "agent-exporter-to-langfuse" "$SHELL_RC" 2>/dev/null; then
+    printf '\n# Agent Langfuse Exporters\n%s\n' "$LOADER_LINE" >> "$SHELL_RC"
+    info "Added profile.d loader to $SHELL_RC."
 else
-    info "Source line already in $SHELL_RC, skipping."
+    info "Profile.d loader already in $SHELL_RC, skipping."
 fi
 
-# 6c. LaunchAgent for GUI apps (macOS only)
+# --- 8. LaunchAgent for GUI apps (macOS only) ---
 if [ "$(uname)" = "Darwin" ]; then
     mkdir -p "$LAUNCH_AGENT_DIR"
 
@@ -220,12 +238,12 @@ if [ "$(uname)" = "Darwin" ]; then
         <string>/bin/bash</string>
         <string>-c</string>
         <string>
-if [ -f "$HOME/.config/opencode/langfuse.env" ]; then
-    . "$HOME/.config/opencode/langfuse.env"
-    env | grep -E '^(LANGFUSE_|OC_LANGFUSE_)' | while IFS='=' read -r k v; do
-        launchctl setenv "$k" "$v"
-    done
-fi
+for f in "$HOME"/.config/agent-exporter-to-langfuse/*.env; do
+    [ -f "$f" ] && . "$f"
+done
+env | grep -E '^(LANGFUSE_|LANGFUSE_)' | while IFS='=' read -r k v; do
+    launchctl setenv "$k" "$v"
+done
         </string>
     </array>
 </dict>
@@ -234,7 +252,7 @@ PLISTEOF
 
     launchctl load "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
     . "$LANGFUSE_ENV_FILE"
-    env | grep -E '^(LANGFUSE_|OC_LANGFUSE_)' | while IFS='=' read -r k v; do
+    env | grep -E '^(LANGFUSE_|LANGFUSE_)' | while IFS='=' read -r k v; do
         launchctl setenv "$k" "$v"
     done
 
@@ -247,6 +265,8 @@ echo ""
 echo "  Langfuse Base URL:   $LANGFUSE_BASE_URL"
 echo "  Langfuse Public Key: ${LANGFUSE_PUBLIC_KEY:0:12}..."
 echo "  Langfuse Secret Key: ${LANGFUSE_SECRET_KEY:0:12}..."
+echo "  Langfuse User ID:   ${LANGFUSE_USER_ID:-<OS username>}"
+echo "  Langfuse Tags:      $FINAL_TAGS"
 echo ""
 echo "  Plugin: $PLUGIN_DEST"
 echo "  Env file: $LANGFUSE_ENV_FILE"

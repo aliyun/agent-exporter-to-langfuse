@@ -8,7 +8,7 @@ This hook works with all Qoder products that share the `~/.qoder/` configuration
 
 | Product | Type | Notes |
 |---------|------|-------|
-| **Qoder CLI** (`qodercli`) | CLI | Full support: `message.usage`, `message.model`, `message.id`, subagent capture via `agent_transcript_path` (v1.0.10+) |
+| **Qoder CLI** (`qodercli`) | CLI | `message.model`, `message.id`, subagent capture via `agent_transcript_path` (v1.0.10+). **No `message.usage`** — token data unavailable for CLI sessions. |
 | **Qoder Desktop** | GUI (Electron) | Token/model enriched from SQLite DB; subagent internals not available (see [Known limitations](#known-limitations)) |
 | **QoderWake** | CLI wrapper | Uses `qodercli` under the hood — fully supported, no separate configuration needed |
 
@@ -16,7 +16,7 @@ This hook works with all Qoder products that share the `~/.qoder/` configuration
 
 ```bash
 git clone https://github.com/aliyun/agent-exporter-to-langfuse.git
-cd agent-exporter-to-langfuse/qoder
+cd agent-exporter-to-langfuse/hooks/qoder
 bash install.sh
 ```
 
@@ -38,10 +38,10 @@ The install script configures the required environment variables. Full variable 
 | `LANGFUSE_SECRET_KEY` | Yes | Your Langfuse secret key (set during install). |
 | `LANGFUSE_PUBLIC_KEY` | Yes | Your Langfuse public key (set during install). |
 | `LANGFUSE_BASE_URL` | Yes | Your Langfuse host URL (set during install). |
-| `QD_LANGFUSE_USER_ID` | No | User identifier for Langfuse traces. Defaults to OS account username if not set. |
-| `QD_LANGFUSE_TAGS` | No | Comma-separated tags for Langfuse traces (e.g. `qoder,production`). Default `qoder`. |
-| `QD_LANGFUSE_MAX_CHARS` | No | Maximum characters per content field. Default 800000 (~200K tokens). |
-| `QD_LANGFUSE_DEBUG` | No | Verbose logging to `~/.qoder/state/langfuse_hook.log`. Default `true`. Set `false` to disable. |
+| `LANGFUSE_USER_ID` | No | User identifier for Langfuse traces. Defaults to OS account username if not set. |
+| `LANGFUSE_TAGS` | No | Comma-separated tags for Langfuse traces (e.g. `qoder,production`). Default `qoder`. |
+| `LANGFUSE_MAX_CHARS` | No | Maximum characters per content field. Default 800000 (~200K tokens). |
+| `LANGFUSE_DEBUG` | No | Verbose logging to `~/.qoder/state/langfuse_hook.log`. Default `true`. Set `false` to disable. |
 
 Credentials are stored in a dedicated file `~/.qoder/langfuse.env`. The shell profile only adds a single `source` line, making it cleanly removable on uninstall.
 
@@ -95,10 +95,10 @@ JSONL transcripts do not contain token usage data. The hook attempts to enrich t
 
 Effective coverage:
 
-| | CLI sessions (v1.0.9+) | Desktop sessions |
+| | CLI sessions | Desktop sessions |
 |---|---|---|
 | Model | From JSONL `message.model` | Enriched from DB `model_key` |
-| Token usage | From JSONL `message.usage` | Enriched from DB `token_info` |
+| Token usage | Not available (no `message.usage` in transcript, no DB) | Enriched from DB `token_info` |
 | Subagent capture | Via `SubagentStop` + `agent_transcript_path` | Not available (no `agent_transcript_path` in payload) |
 
 ### Known limitations
@@ -113,11 +113,11 @@ The main transcript records subagent invocations as `Agent` tool_use/tool_result
 
 Qoder CLI (v1.0.10+) provides `agent_transcript_path` in the SubagentStop payload, enabling full subagent observability including all internal tool calls and token usage.
 
-**Qoder Desktop/IDE: no token usage or model in transcript**
+**No token usage in transcript (CLI and Desktop)**
 
-Desktop transcript assistant messages do not include `message.usage` or `message.model`. Token data is enriched from the SQLite database (`chat_message.token_info` / `model_info`) via approximate timestamp matching (5-second window). This works for most cases but may miss records if timestamps diverge.
+Neither CLI nor Desktop transcript assistant messages include `message.usage`. Token data is only available for Desktop sessions, enriched from the SQLite database (`chat_message.token_info` / `model_info`) via approximate timestamp matching (5-second window). CLI sessions have no token data source — the CLI does not write to the SQLite DB. We have reported this to the Qoder team and are waiting for `message.usage` support in a future CLI release.
 
-Qoder CLI (v1.0.10+) includes `message.usage` and `message.model` directly in transcript assistant messages, providing accurate data without DB enrichment.
+CLI transcript does include `message.model` (e.g. `"performance"`); Desktop does not (enriched from DB `model_key`).
 
 **Qoder Desktop/IDE: content blocks split across rows without message.id**
 
@@ -131,10 +131,11 @@ To track costs in Langfuse, manually add pricing for these aliases in your Langf
 
 ### Summary of CLI vs Desktop differences
 
-| Feature | CLI (v1.0.10+) | Desktop (v1.4.0) | Waiting for Qoder team |
-|---------|----------------|-------------------|----------------------|
-| `message.usage` in transcript | Yes | No (DB fallback) | Align Desktop transcript format |
-| `message.model` in transcript | Yes | No (DB fallback) | Align Desktop transcript format |
+| Feature | CLI | Desktop | Waiting for Qoder team |
+|---------|-----|---------|----------------------|
+| `message.usage` in transcript | No | No | Add `message.usage` to both CLI and Desktop |
+| `message.model` in transcript | Yes | No (DB fallback) | Add `message.model` to Desktop |
+| Token usage | No data source | DB enrichment | Add `message.usage` to CLI transcript |
 | `message.id` for row grouping | Yes | No (heuristic merge) | Add `message.id` to Desktop rows |
 | `SubagentStop` with `agent_transcript_path` | Yes | No (only `transcript_path`) | Add `agent_transcript_path` to Desktop payload |
 | Subagent final output in main transcript | Yes | Yes | — |
@@ -173,7 +174,7 @@ To track costs in Langfuse, manually add pricing for these aliases in your Langf
 ## Uninstall
 
 ```bash
-cd agent-exporter-to-langfuse/qoder
+cd agent-exporter-to-langfuse/hooks/qoder
 bash uninstall.sh
 ```
 
@@ -186,7 +187,7 @@ The uninstall script removes:
 
 ## Troubleshooting
 
-- **Nothing in Langfuse**: check `~/.qoder/state/langfuse_hook.log` (set `QD_LANGFUSE_DEBUG=true`).
+- **Nothing in Langfuse**: check `~/.qoder/state/langfuse_hook.log` (set `LANGFUSE_DEBUG=true`).
 - **Hook not firing**: verify the `Stop` hook entry exists in `~/.qoder/settings.json`; restart Qoder.
 - **uv errors**: ensure [uv](https://docs.astral.sh/uv/) is installed and available on your PATH.
 

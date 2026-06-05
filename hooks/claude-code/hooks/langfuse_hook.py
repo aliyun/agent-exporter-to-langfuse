@@ -34,9 +34,9 @@ def _opt(name: str) -> str:
     """Read a plugin userConfig value (CLAUDE_PLUGIN_OPTION_<NAME>) with a fallback to a plain env var."""
     return os.environ.get(f"CLAUDE_PLUGIN_OPTION_{name}") or os.environ.get(name) or ""
 
-DEBUG = _opt("CC_LANGFUSE_DEBUG").lower() != "false"
+DEBUG = (_opt("LANGFUSE_DEBUG") or "true").lower() != "false"
 try:
-    MAX_CHARS = int(_opt("CC_LANGFUSE_MAX_CHARS") or "800000")
+    MAX_CHARS = int(_opt("LANGFUSE_MAX_CHARS") or "800000")
 except ValueError:
     MAX_CHARS = 800000
 
@@ -518,7 +518,7 @@ def _start_backdated(langfuse: Langfuse, *, name: str, as_type: str,
     )
 
 
-def emit_turn(langfuse: Langfuse, session_id: str, turn_num: int, turn: Turn, transcript_path: Path, user_id: Optional[str] = None, tags: Optional[List[str]] = None) -> None:
+def emit_turn(langfuse: Langfuse, session_id: str, turn_num: int, turn: Turn, transcript_path: Path, user_id: Optional[str] = None, tags: Optional[List[str]] = None, is_subagent: bool = False) -> None:
     user_text_raw = extract_text(get_content(turn.user_msg))
     user_text, user_text_meta = truncate_text(user_text_raw)
 
@@ -535,9 +535,11 @@ def emit_turn(langfuse: Langfuse, session_id: str, turn_num: int, turn: Turn, tr
             candidate_end_ts.append(t)
     turn_end_ts = max(candidate_end_ts) if candidate_end_ts else None
 
+    trace_label = f"Claude Code - Subagent Turn {turn_num}" if is_subagent else f"Claude Code - Turn {turn_num}"
+
     pa_kwargs: Dict[str, Any] = {
         "session_id": session_id,
-        "trace_name": f"Claude Code - Turn {turn_num}",
+        "trace_name": trace_label,
         "tags": tags or ["claude-code"],
     }
     if user_id:
@@ -546,7 +548,7 @@ def emit_turn(langfuse: Langfuse, session_id: str, turn_num: int, turn: Turn, tr
     with propagate_attributes(**pa_kwargs):
         trace_span = _start_backdated(
             langfuse,
-            name=f"Claude Code - Turn {turn_num}",
+            name=trace_label,
             as_type="span",
             start_time=user_ts,
             input={"role": "user", "content": user_text},
@@ -693,7 +695,7 @@ def emit_turn(langfuse: Langfuse, session_id: str, turn_num: int, turn: Turn, tr
         trace_span.end(end_time=_to_ns(turn_end_ts or last_assistant_ts or user_ts))
 
 def resolve_user_id() -> Optional[str]:
-    uid = _opt("CC_LANGFUSE_USER_ID")
+    uid = _opt("LANGFUSE_USER_ID")
     if uid:
         return uid
     for k in ("USER", "LOGNAME", "USERNAME"):
@@ -711,14 +713,16 @@ def main() -> int:
     start = time.time()
     debug("Hook started")
 
-    public_key = _opt("LANGFUSE_PUBLIC_KEY") or _opt("CC_LANGFUSE_PUBLIC_KEY")
-    secret_key = _opt("LANGFUSE_SECRET_KEY") or _opt("CC_LANGFUSE_SECRET_KEY")
-    host = _opt("LANGFUSE_BASE_URL") or _opt("CC_LANGFUSE_BASE_URL") or "https://us.cloud.langfuse.com"
+    public_key = _opt("LANGFUSE_PUBLIC_KEY")
+    secret_key = _opt("LANGFUSE_SECRET_KEY")
+    host = _opt("LANGFUSE_BASE_URL") or "https://us.cloud.langfuse.com"
 
     if not public_key or not secret_key:
         return 0
 
     payload = read_hook_payload()
+    hook_event = payload.get("hook_event_name") or payload.get("hookEventName") or ""
+    is_subagent = hook_event == "SubagentStop"
     session_id, transcript_path = extract_session_and_transcript(payload)
 
     if not session_id or not transcript_path:
@@ -731,7 +735,7 @@ def main() -> int:
         return 0
 
     user_id = resolve_user_id()
-    tags_raw = _opt("CC_LANGFUSE_TAGS") or "claude-code"
+    tags_raw = _opt("LANGFUSE_TAGS") or "claude-code"
     tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
 
     langfuse = None
@@ -764,10 +768,10 @@ def main() -> int:
                 emitted += 1
                 turn_num = ss.turn_count + emitted
                 try:
-                    emit_turn(langfuse, session_id, turn_num, t, transcript_path, user_id=user_id, tags=tags)
+                    emit_turn(langfuse, session_id, turn_num, t, transcript_path, user_id=user_id, tags=tags, is_subagent=is_subagent)
                 except Exception as e:
                     # Log at INFO so SDK incompatibilities (and other emit failures)
-                    # are visible without needing CC_LANGFUSE_DEBUG=true.
+                    # are visible without needing LANGFUSE_DEBUG=true.
                     info(f"emit_turn failed: {type(e).__name__}: {e}")
                     # continue emitting other turns
 

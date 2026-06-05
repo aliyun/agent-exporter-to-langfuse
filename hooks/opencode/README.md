@@ -6,7 +6,7 @@ Trace every OpenCode session to [Langfuse](https://langfuse.com) — turns, gene
 
 ```bash
 git clone https://github.com/aliyun/agent-exporter-to-langfuse.git
-cd agent-exporter-to-langfuse/opencode
+cd agent-exporter-to-langfuse/hooks/opencode
 bash install.sh
 ```
 
@@ -28,10 +28,10 @@ The install script configures the required environment variables. Full variable 
 | `LANGFUSE_SECRET_KEY` | Yes | Your Langfuse secret key (set during install). |
 | `LANGFUSE_PUBLIC_KEY` | Yes | Your Langfuse public key (set during install). |
 | `LANGFUSE_BASE_URL` | Yes | Your Langfuse host URL (set during install). |
-| `OC_LANGFUSE_USER_ID` | No | User identifier for Langfuse traces. Defaults to OS username if not set. |
-| `OC_LANGFUSE_TAGS` | No | Comma-separated tags for Langfuse traces (e.g. `opencode,production`). Default `opencode`. |
-| `OC_LANGFUSE_MAX_CHARS` | No | Maximum characters per content field. Default 800000 (~200K tokens). |
-| `OC_LANGFUSE_DEBUG` | No | Verbose logging to `~/.config/opencode/logs/langfuse-exporter/`. Default `true`. Set `false` to disable. |
+| `LANGFUSE_USER_ID` | No | User identifier for Langfuse traces. Defaults to OS username if not set. |
+| `LANGFUSE_TAGS` | No | Comma-separated tags for Langfuse traces (e.g. `opencode,production`). Default `opencode`. |
+| `LANGFUSE_MAX_CHARS` | No | Maximum characters per content field. Default 800000 (~200K tokens). |
+| `LANGFUSE_DEBUG` | No | Verbose logging to `~/.config/opencode/logs/langfuse-exporter/`. Default `true`. Set `false` to disable. |
 
 Credentials are stored in a dedicated file `~/.config/opencode/langfuse.env`. The shell profile only adds a single `source` line, making it cleanly removable on uninstall.
 
@@ -114,7 +114,7 @@ Token costs are reported as-is from OpenCode's internal accounting. If your prov
 ## Uninstall
 
 ```bash
-cd agent-exporter-to-langfuse/opencode
+cd agent-exporter-to-langfuse/hooks/opencode
 bash uninstall.sh
 ```
 

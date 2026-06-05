@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOOK_DIR="$HOME/.qoderwork/hooks/langfuse"
-SETTINGS_FILE="$HOME/.qoderwork/settings.json"
-LANGFUSE_ENV_FILE="$HOME/.qoderwork/langfuse.env"
-LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/com.qoderwork.langfuse-env.plist"
+HOOK_DIR="$HOME/.qoder/hooks/langfuse"
+SETTINGS_FILE="$HOME/.qoder/settings.json"
+LANGFUSE_PROFILE_DIR="$HOME/.config/agent-exporter-to-langfuse"
+LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/qoder.env"
+LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/com.qoder.langfuse-env.plist"
 
 if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
     SHELL_RC="$HOME/.zshenv"
@@ -20,10 +21,10 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 
-echo "=== Uninstall QoderWork Langfuse Hook ==="
+echo "=== Uninstall Qoder Langfuse Hook ==="
 echo ""
 
-# --- 1. Remove hook files ---
+# --- 1. Remove hook directory ---
 if [ -d "$HOOK_DIR" ]; then
     rm -rf "$HOOK_DIR"
     info "Removed hook directory: $HOOK_DIR"
@@ -73,27 +74,33 @@ else
     warn "Env file not found, skipping: $LANGFUSE_ENV_FILE"
 fi
 
-# --- 4. Remove source line from shell profile ---
-if [ -f "$SHELL_RC" ] && grep -qF "qoderwork/langfuse.env" "$SHELL_RC" 2>/dev/null; then
-    python3 -c "
+# --- 4. Clean up profile.d directory if empty ---
+if [ -d "$LANGFUSE_PROFILE_DIR" ] && [ -z "$(ls -A "$LANGFUSE_PROFILE_DIR" 2>/dev/null)" ]; then
+    rmdir "$LANGFUSE_PROFILE_DIR"
+    info "Removed empty profile directory: $LANGFUSE_PROFILE_DIR"
+
+    # Remove loader line from shell profile only when no agents remain
+    if [ -f "$SHELL_RC" ] && grep -qF "agent-exporter-to-langfuse" "$SHELL_RC" 2>/dev/null; then
+        python3 -c "
 import sys
 lines = open(sys.argv[1]).readlines()
 out = []
 skip_next = False
 for line in lines:
-    if '# Langfuse (QoderWork)' in line:
+    if '# Agent Langfuse Exporters' in line:
         skip_next = True
         if out and out[-1].strip() == '':
             out.pop()
         continue
-    if skip_next and 'langfuse.env' in line:
+    if skip_next and 'agent-exporter-to-langfuse' in line:
         skip_next = False
         continue
     skip_next = False
     out.append(line)
 open(sys.argv[1], 'w').writelines(out)
 " "$SHELL_RC"
-    info "Removed source line from $SHELL_RC."
+        info "Removed loader line from $SHELL_RC."
+    fi
 fi
 
 # --- 5. Remove LaunchAgent (macOS) ---
@@ -103,7 +110,6 @@ if [ "$(uname)" = "Darwin" ]; then
         rm -f "$LAUNCH_AGENT_PLIST"
         info "Removed LaunchAgent: $LAUNCH_AGENT_PLIST"
 
-        # Unset from current session
         launchctl unsetenv LANGFUSE_BASE_URL 2>/dev/null || true
         launchctl unsetenv LANGFUSE_PUBLIC_KEY 2>/dev/null || true
         launchctl unsetenv LANGFUSE_SECRET_KEY 2>/dev/null || true
@@ -113,7 +119,7 @@ if [ "$(uname)" = "Darwin" ]; then
 fi
 
 # --- 6. Remove state files ---
-STATE_DIR="$HOME/.qoderwork/state"
+STATE_DIR="$HOME/.qoder/state"
 removed_state=false
 for f in "$STATE_DIR/langfuse_hook.log"* "$STATE_DIR/langfuse_state.json" "$STATE_DIR/langfuse_state.lock"; do
     if [ -f "$f" ]; then
@@ -126,4 +132,4 @@ if [ "$removed_state" = true ]; then
 fi
 
 echo ""
-info "Uninstall complete. Restart QoderWork to apply."
+info "Uninstall complete. Restart Qoder to apply."
