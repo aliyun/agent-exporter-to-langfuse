@@ -6,7 +6,7 @@ cd "$SCRIPT_DIR"
 # then $HOME-based path as fallback
 for _env in \
     "$SCRIPT_DIR/langfuse.env" \
-    "$HOME/.config/agent-exporter-to-langfuse/qoderwork.env"; do
+    "$HOME/.agent-exporter-to-langfuse/config/qoderwork.env"; do
     [ -f "$_env" ] && . "$_env" && break
 done
 

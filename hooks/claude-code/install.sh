@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$SCRIPT_DIR"
 
 # Shared env directory — each agent has its own .env file here
-LANGFUSE_PROFILE_DIR="$HOME/.config/agent-exporter-to-langfuse"
+LANGFUSE_PROFILE_DIR="$HOME/.agent-exporter-to-langfuse/config"
 LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/claude-code.env"
 
 # Shell profile
@@ -189,7 +189,7 @@ mkdir -p "$LANGFUSE_PROFILE_DIR"
 info "Env vars written to $LANGFUSE_ENV_FILE"
 
 # --- 6. Add profile.d loader to shell profile (one-time, shared across all agents) ---
-LOADER_LINE='for f in "$HOME"/.config/agent-exporter-to-langfuse/*.env; do [ -f "$f" ] && . "$f"; done'
+LOADER_LINE='for f in "$HOME"/.agent-exporter-to-langfuse/config/*.env; do [ -f "$f" ] && . "$f"; done'
 
 if ! grep -qF "agent-exporter-to-langfuse" "$SHELL_RC" 2>/dev/null; then
     printf '\n# Agent Langfuse Exporters\n%s\n' "$LOADER_LINE" >> "$SHELL_RC"
@@ -220,7 +220,7 @@ if [ "$(uname)" = "Darwin" ]; then
         <string>/bin/bash</string>
         <string>-c</string>
         <string>
-for f in "$HOME"/.config/agent-exporter-to-langfuse/*.env; do
+for f in "$HOME"/.agent-exporter-to-langfuse/config/*.env; do
     [ -f "$f" ] && . "$f"
 done
 env | grep -E '^(LANGFUSE_|LANGFUSE_)' | while IFS='=' read -r k v; do

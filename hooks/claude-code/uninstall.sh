@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LANGFUSE_PROFILE_DIR="$HOME/.config/agent-exporter-to-langfuse"
+LANGFUSE_PROFILE_DIR="$HOME/.agent-exporter-to-langfuse/config"
 LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/claude-code.env"
 LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/com.claude-code.langfuse-env.plist"
 

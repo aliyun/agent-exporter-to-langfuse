@@ -3,7 +3,7 @@ set -euo pipefail
 
 HOOK_DIR="$HOME/.qoderwork/hooks/langfuse"
 SETTINGS_FILE="$HOME/.qoderwork/settings.json"
-LANGFUSE_PROFILE_DIR="$HOME/.config/agent-exporter-to-langfuse"
+LANGFUSE_PROFILE_DIR="$HOME/.agent-exporter-to-langfuse/config"
 LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/qoderwork.env"
 LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/com.qoderwork.langfuse-env.plist"
 

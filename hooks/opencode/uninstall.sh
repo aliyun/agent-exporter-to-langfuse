@@ -4,7 +4,7 @@ set -euo pipefail
 OC_CONFIG_DIR="$HOME/.config/opencode"
 OC_CONFIG_FILE="$OC_CONFIG_DIR/opencode.json"
 PLUGIN_FILE="$OC_CONFIG_DIR/plugins/langfuse-exporter.mjs"
-LANGFUSE_PROFILE_DIR="$HOME/.config/agent-exporter-to-langfuse"
+LANGFUSE_PROFILE_DIR="$HOME/.agent-exporter-to-langfuse/config"
 LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/opencode.env"
 LOG_DIR="$OC_CONFIG_DIR/logs/langfuse-exporter"
 LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/com.opencode.langfuse-env.plist"

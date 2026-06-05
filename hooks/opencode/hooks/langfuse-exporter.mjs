@@ -56,7 +56,7 @@ const curlFetch = (url, options = {}) => {
 };
 
 // Load env file as fallback when shell profile hasn't been sourced
-const ENV_FILE = join(homedir(), '.config', 'agent-exporter-to-langfuse', 'opencode.env');
+const ENV_FILE = join(homedir(), '.agent-exporter-to-langfuse', 'config', 'opencode.env');
 try {
   const content = readFileSync(ENV_FILE, 'utf8');
   for (const line of content.split('\n')) {
