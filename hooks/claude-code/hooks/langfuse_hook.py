@@ -17,6 +17,14 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# --- Delivery layer (langstash → direct push → failed log) ---
+try:
+    from langstash_deliver.deliver import deliver_trace
+    from langstash_deliver.schema import build_trace_json, build_generation, build_span, Usage
+    _HAS_DELIVER = True
+except ImportError:
+    _HAS_DELIVER = False
+
 # --- Langfuse import (fail-open) ---
 try:
     from langfuse import Langfuse, propagate_attributes
@@ -288,7 +296,7 @@ def get_model(msg: Dict[str, Any]) -> str:
         return m.get("model") or "claude"
     return "claude"
 
-def get_usage(msg: Dict[str, Any]) -> Optional[Dict[str, int]]:
+def get_usage(msg: Dict[str, Any]) -> Optional["Usage"]:
     """Extract Anthropic token usage from an assistant message, if present."""
     m = msg.get("message")
     if not isinstance(m, dict):
@@ -296,7 +304,7 @@ def get_usage(msg: Dict[str, Any]) -> Optional[Dict[str, int]]:
     u = m.get("usage")
     if not isinstance(u, dict):
         return None
-    details: Dict[str, int] = {}
+    details: Usage = {}
     for src, dst in (
         ("input_tokens", "input"),
         ("output_tokens", "output"),
@@ -708,6 +716,105 @@ def resolve_user_id() -> Optional[str]:
     except Exception:
         return None
 
+# ----------------- Trace Schema v2 builder -----------------
+def _build_trace_v2(session_id: str, turn_num: int, turn: Turn, transcript_path: Path,
+                    user_id: Optional[str], tags: List[str], is_subagent: bool) -> Dict[str, Any]:
+    user_text_raw = extract_text(get_content(turn.user_msg))
+    user_text, _ = truncate_text(user_text_raw)
+    last_assistant = turn.assistant_msgs[-1]
+    final_text, _ = truncate_text(extract_text(get_content(last_assistant)))
+
+    user_ts = parse_ts(turn.user_msg)
+    last_ts = parse_ts(last_assistant)
+    candidate_end = [t for t in [last_ts] if t is not None]
+    for tr in turn.tool_results_by_id.values():
+        t = parse_ts(tr)
+        if t is not None:
+            candidate_end.append(t)
+    turn_end = max(candidate_end) if candidate_end else None
+
+    trace_label = f"Claude Code - Subagent Turn {turn_num}" if is_subagent else f"Claude Code - Turn {turn_num}"
+
+    generations: List[Dict[str, Any]] = []
+    spans: List[Dict[str, Any]] = []
+    prev_ts = user_ts
+
+    for idx, am in enumerate(turn.assistant_msgs):
+        am_ts = parse_ts(am)
+        am_text, _ = truncate_text(extract_text(get_content(am)))
+        model = get_model(am)
+        tool_uses = iter_tool_uses(get_content(am))
+
+        if idx == 0:
+            gen_input: Any = {"role": "user", "content": user_text}
+        else:
+            gen_input = None
+
+        gen_tool_calls = []
+        for tu in tool_uses:
+            tu_inp = tu.get("input")
+            if isinstance(tu_inp, str):
+                tu_inp, _ = truncate_text(tu_inp)
+            gen_tool_calls.append({"id": tu.get("id"), "name": tu.get("name"), "input": tu_inp})
+
+        gen_output: Dict[str, Any] = {"role": "assistant"}
+        if am_text:
+            gen_output["content"] = am_text
+        if gen_tool_calls:
+            gen_output["tool_calls"] = gen_tool_calls
+
+        usage = get_usage(am)
+        gen = build_generation(
+            name=f"Claude Generation {idx + 1}", model=model,
+            start_time=prev_ts or am_ts, end_time=am_ts,
+            gen_input=gen_input, gen_output=gen_output,
+            usage=usage, metadata={"assistant_index": idx, "tool_count": len(tool_uses)},
+        )
+        generations.append(gen)
+
+        batch_end: List[datetime] = []
+        for tu in tool_uses:
+            tid = str(tu.get("id") or "")
+            tname = tu.get("name") or "unknown"
+            tinput_raw = tu.get("input") if isinstance(tu.get("input"), (dict, list, str, int, float, bool)) else {}
+            if isinstance(tinput_raw, str):
+                tinput, _ = truncate_text(tinput_raw)
+            else:
+                tinput = tinput_raw
+            tr_entry = turn.tool_results_by_id.get(tid)
+            out_trunc, tr_ts = None, None
+            if tr_entry:
+                out_raw = tr_entry.get("content")
+                out_str = out_raw if isinstance(out_raw, str) else json.dumps(out_raw, ensure_ascii=False)
+                out_trunc, _ = truncate_text(out_str)
+                tr_ts = parse_ts(tr_entry.get("timestamp"))
+            if tr_ts:
+                batch_end.append(tr_ts)
+            spans.append(build_span(
+                name=f"Tool: {tname}", generation_index=idx,
+                start_time=am_ts, end_time=tr_ts or am_ts,
+                span_input=tinput, span_output=out_trunc,
+                metadata={"tool_name": tname, "tool_id": tid},
+            ))
+
+        if batch_end:
+            prev_ts = max(batch_end)
+        elif am_ts:
+            prev_ts = am_ts
+
+    return build_trace_json(
+        source="claude-code", session_id=session_id, user_id=user_id, tags=tags,
+        trace_name=trace_label, start_time=user_ts, end_time=turn_end,
+        user_input={"role": "user", "content": user_text},
+        assistant_output={"role": "assistant", "content": final_text},
+        metadata={
+            "source": "claude-code", "turn_number": turn_num,
+            "is_subagent": is_subagent, "assistant_message_count": len(turn.assistant_msgs),
+            "transcript_path": str(transcript_path),
+        },
+        generations=generations, spans=spans,
+    )
+
 # ----------------- Main -----------------
 def main() -> int:
     start = time.time()
@@ -767,13 +874,29 @@ def main() -> int:
             for t in turns:
                 emitted += 1
                 turn_num = ss.turn_count + emitted
-                try:
-                    emit_turn(langfuse, session_id, turn_num, t, transcript_path, user_id=user_id, tags=tags, is_subagent=is_subagent)
-                except Exception as e:
-                    # Log at INFO so SDK incompatibilities (and other emit failures)
-                    # are visible without needing LANGFUSE_DEBUG=true.
-                    info(f"emit_turn failed: {type(e).__name__}: {e}")
-                    # continue emitting other turns
+
+                if _HAS_DELIVER:
+                    try:
+                        trace_json = _build_trace_v2(session_id, turn_num, t, transcript_path,
+                                                     user_id=user_id, tags=tags, is_subagent=is_subagent)
+                    except Exception as e:
+                        debug(f"_build_trace_v2 failed: {e}")
+                        trace_json = None
+
+                    def _direct_push(_tj, _t=t, _turn_num=turn_num):
+                        emit_turn(langfuse, session_id, _turn_num, _t, transcript_path,
+                                  user_id=user_id, tags=tags, is_subagent=is_subagent)
+                        return True
+
+                    if trace_json:
+                        deliver_trace(trace_json, direct_push_fn=_direct_push)
+                    else:
+                        _direct_push(None)
+                else:
+                    try:
+                        emit_turn(langfuse, session_id, turn_num, t, transcript_path, user_id=user_id, tags=tags, is_subagent=is_subagent)
+                    except Exception as e:
+                        info(f"emit_turn failed: {type(e).__name__}: {e}")
 
             ss.turn_count += emitted
             write_session_state(state, key, ss)

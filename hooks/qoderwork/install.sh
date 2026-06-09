@@ -227,6 +227,8 @@ mkdir -p "$LANGFUSE_PROFILE_DIR"
     echo "export LANGFUSE_SECRET_KEY=\"$LANGFUSE_SECRET_KEY\""
     [ -n "$LANGFUSE_USER_ID" ] && echo "export LANGFUSE_USER_ID=\"$LANGFUSE_USER_ID\""
     echo "export LANGFUSE_TAGS=\"$FINAL_TAGS\""
+    echo "export LANGSTASH_ENABLED=\"true\""
+    echo "export LANGSTASH_URL=\"http://127.0.0.1:5288\""
 } > "$LANGFUSE_ENV_FILE"
 # Hard-link to hook directory so the VM entrypoint can find it (shared data, no duplication)
 ln -f "$LANGFUSE_ENV_FILE" "$HOOK_DIR/langfuse.env"
@@ -267,7 +269,7 @@ if [ "$(uname)" = "Darwin" ]; then
 for f in "$HOME"/.agent-exporter-to-langfuse/config/*.env; do
     [ -f "$f" ] && . "$f"
 done
-env | grep -E '^(LANGFUSE_|LANGFUSE_)' | while IFS='=' read -r k v; do
+env | grep -E '^(LANGFUSE_|LANGSTASH_)' | while IFS='=' read -r k v; do
     launchctl setenv "$k" "$v"
 done
         </string>
@@ -278,7 +280,7 @@ PLISTEOF
 
     launchctl load "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
     . "$LANGFUSE_ENV_FILE"
-    env | grep -E '^(LANGFUSE_|LANGFUSE_)' | while IFS='=' read -r k v; do
+    env | grep -E '^(LANGFUSE_|LANGSTASH_)' | while IFS='=' read -r k v; do
         launchctl setenv "$k" "$v"
     done
 

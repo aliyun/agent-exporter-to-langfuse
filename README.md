@@ -2,6 +2,36 @@
 
 Export AI Agent session observability data (conversation turns, model calls, tool usage, token consumption) to [Langfuse](https://langfuse.com) with zero code changes.
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                      AI Agents                          │
+│  Claude Code · Qoder · QoderWork · OpenCode · ...       │
+└────────┬────────────────────────────────────────────────┘
+         │ Plugin Hook (per-agent)
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│                   langstash-deliver                     │
+│  Three-tier delivery:                                   │
+│    1. langstash (local buffer) ─► preferred              │
+│    2. Langfuse SDK (direct push) ─► fallback             │
+│    3. Failed log (~/.agent-exporter-to-langfuse/data/)   │
+└────────┬──────────────────────┬─────────────────────────┘
+         │ POST /ingest         │ Direct SDK push
+         ▼                      ▼
+┌──────────────────┐   ┌──────────────────┐
+│    langstash     │   │                  │
+│  Local buffer &  │──►│     Langfuse     │
+│  batch sender    │   │                  │
+│  (macOS menubar) │   │                  │
+└──────────────────┘   └──────────────────┘
+```
+
+- **hooks/** — per-agent plugin hooks that capture session data and hand off to `langstash-deliver`
+- **langstash-deliver** — shared delivery library with three-tier fallback (langstash → direct push → local log)
+- **langstash** (`exporter/`) — local HTTP buffer daemon that accepts traces, batches them, and reliably delivers to Langfuse; includes a macOS menubar app and web dashboard
+
 ## Supported Agents
 
 | Agent | Directory | Description |
@@ -15,7 +45,13 @@ See the README in each directory for detailed configuration and usage instructio
 
 ## Install
 
-The unified installer auto-detects installed agents and configures them all at once.
+One-line install (requires `git`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aliyun/agent-exporter-to-langfuse/main/install-remote.sh | bash
+```
+
+Or clone and install manually:
 
 ```bash
 git clone https://github.com/aliyun/agent-exporter-to-langfuse.git
@@ -34,12 +70,6 @@ LANGFUSE_TAGS=team:clickhouse,env:personal \
 bash install.sh
 ```
 
-You can also select specific agents:
-
-```bash
-bash install.sh --agents claude-code,qoder
-```
-
 ### Configuration
 
 | Variable | Required | Description |
@@ -53,13 +83,13 @@ bash install.sh --agents claude-code,qoder
 ## Uninstall
 
 ```bash
-bash uninstall.sh
+bash ~/.agent-exporter-to-langfuse/uninstall.sh
 ```
 
 The uninstaller detects which agents have Langfuse hooks installed and lets you select which to remove. Use `-y` to remove all without prompting:
 
 ```bash
-bash uninstall.sh -y
+bash ~/.agent-exporter-to-langfuse/uninstall.sh -y
 ```
 
 ## Langfuse Backend

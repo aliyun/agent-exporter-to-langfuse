@@ -16,4 +16,7 @@ if ! .venv/bin/python -c "" 2>/dev/null; then
     .venv/bin/pip install -q langfuse 2>/dev/null
 fi
 
+DELIVER_PKG="$HOME/.agent-exporter-to-langfuse/hooks/langstash-deliver/python"
+[ -d "$DELIVER_PKG" ] && .venv/bin/pip install -q "$DELIVER_PKG" 2>/dev/null
+
 exec .venv/bin/python langfuse_hook.py

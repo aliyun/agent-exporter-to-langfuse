@@ -25,6 +25,7 @@ LANGFUSE_USER_ID="${LANGFUSE_USER_ID:-}"
 LANGFUSE_TAGS="${LANGFUSE_TAGS:-}"
 ARG_AGENTS=""
 ARG_NO_INSTALL_UV=false
+ARG_UPGRADE=false
 ARG_YES=false
 
 while [[ $# -gt 0 ]]; do
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --tags)        LANGFUSE_TAGS="$2"; shift 2 ;;
         --agents)      ARG_AGENTS="$2"; shift 2 ;;
         --no-install-uv) ARG_NO_INSTALL_UV=true; shift ;;
+        --upgrade)     ARG_UPGRADE=true; shift ;;
         -y|--yes)      ARG_YES=true; shift ;;
         -h|--help)
             echo "Usage: bash install.sh [OPTIONS]"
@@ -48,6 +50,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --tags TAGS         Extra tags (comma-separated, e.g. team:olap,env:prod). Agent name is always included."
             echo "  --agents LIST       Comma-separated agents to install (claude-code,qoder,qoderwork,opencode)"
             echo "  --no-install-uv     Skip automatic uv installation"
+            echo "  --upgrade           Upgrade mode: reuse existing config, skip interactive prompts"
             echo "  -y, --yes           Skip interactive agent selection, install all detected"
             echo "  -h, --help          Show this help"
             exit 0
@@ -57,10 +60,48 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ============================================================
+# Step 0: Version display + Relocate + Upgrade mode
+# ============================================================
+INSTALL_DIR="$HOME/.agent-exporter-to-langfuse"
+VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "dev")
+
+echo ""
+echo -e "${BOLD}=== Agent Exporter to Langfuse v${VERSION} — Unified Installer ===${NC}"
+
+# --- Sync to standard path if running from elsewhere ---
+CURRENT="$(cd "$SCRIPT_DIR" && pwd)"
+CANONICAL="$(cd "$INSTALL_DIR" 2>/dev/null && pwd 2>/dev/null)" || CANONICAL=""
+if [ "$CURRENT" != "$CANONICAL" ] && [ "$CURRENT" != "$INSTALL_DIR" ]; then
+    info "Syncing to $INSTALL_DIR ..."
+    mkdir -p "$INSTALL_DIR"
+    # Copy all non-ignored files (tracked + untracked, respects .gitignore)
+    if command -v git &>/dev/null && [ -d "$SCRIPT_DIR/.git" ]; then
+        (cd "$SCRIPT_DIR" && { git ls-files -z; git ls-files --others --exclude-standard -z; } | sort -uz | while IFS= read -r -d '' f; do
+            mkdir -p "$INSTALL_DIR/$(dirname "$f")"
+            cp -f "$f" "$INSTALL_DIR/$f"
+        done)
+    else
+        cp -R "$SCRIPT_DIR/"* "$INSTALL_DIR/"
+    fi
+    info "Synced. Switching to $INSTALL_DIR"
+    exec bash "$INSTALL_DIR/install.sh" "$@"
+fi
+
+# --- Upgrade mode: reuse existing config ---
+if [ "$ARG_UPGRADE" = true ]; then
+    info "Upgrade mode: reusing existing configuration"
+    CONFIG_DIR="$INSTALL_DIR/config"
+    for env_file in "$CONFIG_DIR"/*.env; do
+        [ -f "$env_file" ] || continue
+        agent_name=$(basename "$env_file" .env)
+        # Source env to pick up credentials
+        . "$env_file"
+    done
+fi
+
+# ============================================================
 # Step 1: Detect installed coding agents
 # ============================================================
-echo ""
-echo -e "${BOLD}=== Agent Exporter to Langfuse — Unified Installer ===${NC}"
 echo ""
 
 declare -a DETECTED_AGENTS=()
@@ -103,7 +144,19 @@ fi
 # --- Agent selection ---
 declare -a SELECTED_AGENTS=()
 
-if [ -n "$ARG_AGENTS" ]; then
+if [ "$ARG_UPGRADE" = true ]; then
+    # Upgrade mode: infer agents from existing env files
+    for env_file in "$INSTALL_DIR/config"/*.env; do
+        [ -f "$env_file" ] || continue
+        agent_name=$(basename "$env_file" .env)
+        case "$agent_name" in
+            claude-code|qoder|qoderwork|opencode) SELECTED_AGENTS+=("$agent_name") ;;
+        esac
+    done
+    if [ ${#SELECTED_AGENTS[@]} -eq 0 ]; then
+        SELECTED_AGENTS=("${DETECTED_AGENTS[@]}")
+    fi
+elif [ -n "$ARG_AGENTS" ]; then
     # Explicit --agents flag: use directly, no interaction
     IFS=',' read -ra AGENT_LIST <<< "$ARG_AGENTS"
     for agent in "${AGENT_LIST[@]}"; do
@@ -310,7 +363,18 @@ for agent in "${SELECTED_AGENTS[@]}"; do
 done
 
 # ============================================================
-# Step 5: Summary
+# Step 5: Install langstash service
+# ============================================================
+echo ""
+echo -e "${BOLD}--- Installing: langstash ---${NC}"
+INSTALL_DIR="$INSTALL_DIR" \
+LANGFUSE_PUBLIC_KEY="$LANGFUSE_PUBLIC_KEY" \
+LANGFUSE_SECRET_KEY="$LANGFUSE_SECRET_KEY" \
+LANGFUSE_BASE_URL="$LANGFUSE_BASE_URL" \
+bash "$SCRIPT_DIR/exporter/install-langstash.sh" || warn "langstash installation skipped"
+
+# ============================================================
+# Step 6: Summary
 # ============================================================
 echo ""
 echo -e "${BOLD}=== Installation Complete ===${NC}"
@@ -324,4 +388,4 @@ echo ""
 echo "  Installed for: ${SELECTED_AGENTS[*]}"
 echo ""
 echo "  Restart your coding agents to start tracing."
-echo "  To uninstall: bash uninstall.sh"
+echo "  To uninstall: bash $INSTALL_DIR/uninstall.sh"

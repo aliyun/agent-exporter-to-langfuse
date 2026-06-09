@@ -5,10 +5,10 @@
 *.swp
 *.swo
 
-# Python / uv (auto-generated)
+# Python / uv
+__pycache__/
 .venv/
 .python-version
-pyproject.toml
 uv.lock
 
 # Claude Code local config
@@ -23,3 +23,9 @@ Thumbs.db
 
 # ENV
 .env
+
+# Runtime data (langstash)
+config/
+data/
+logs/
+.update-check

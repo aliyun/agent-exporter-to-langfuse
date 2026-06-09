@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\"/hooks/ && if [ ! -f pyproject.toml ]; then uv init && uv add langfuse; fi && uv run python langfuse_hook.py",
+            "command": ". \"$HOME\"/.agent-exporter-to-langfuse/config/claude-code.env 2>/dev/null; cd \"${CLAUDE_PLUGIN_ROOT}\"/hooks/ && if [ ! -f pyproject.toml ]; then uv init && uv add langfuse; fi && uv pip install -q \"$HOME/.agent-exporter-to-langfuse/hooks/langstash-deliver/python\" 2>/dev/null; uv run python langfuse_hook.py",
             "timeout": 20,
             "async": true
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\"/hooks/ && if [ ! -f pyproject.toml ]; then uv init && uv add langfuse; fi && uv run python langfuse_hook.py",
+            "command": ". \"$HOME\"/.agent-exporter-to-langfuse/config/claude-code.env 2>/dev/null; cd \"${CLAUDE_PLUGIN_ROOT}\"/hooks/ && if [ ! -f pyproject.toml ]; then uv init && uv add langfuse; fi && uv pip install -q \"$HOME/.agent-exporter-to-langfuse/hooks/langstash-deliver/python\" 2>/dev/null; uv run python langfuse_hook.py",
             "timeout": 20,
             "async": true
           }

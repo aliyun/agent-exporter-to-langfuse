@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220">
+  <style>
+    text { font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif; }
+    .label { font-size: 11px; fill: #888; }
+    .section-title { font-size: 14px; fill: #aaa; font-weight: 700; letter-spacing: 0.5px; }
+  </style>
+
+  <rect width="360" height="220" rx="10" fill="#1a1a1a"/>
+
+  <!-- ===== Menubar Simulation ===== -->
+  <g transform="translate(20, 25)">
+    <text class="section-title" x="0" y="0">Menubar Preview</text>
+    <rect x="0" y="12" width="320" height="28" rx="4" fill="#262626"/>
+
+    <!-- Normal -->
+    <g transform="translate(20, 18)">
+      <rect x="0" y="1" width="20" height="14" rx="2.5" fill="none" stroke="#ddd" stroke-width="1.2"/>
+      <circle cx="6" cy="8" r="1.4" fill="#ddd"/>
+      <circle cx="10" cy="8" r="1.4" fill="#ddd"/>
+      <circle cx="14" cy="8" r="1.4" fill="#ddd"/>
+    </g>
+
+    <!-- Pending -->
+    <g transform="translate(120, 18)">
+      <rect x="0" y="1" width="20" height="14" rx="2.5" fill="none" stroke="#ddd" stroke-width="1.2"/>
+      <circle cx="6" cy="8" r="1.4" fill="#ddd"/>
+      <circle cx="10" cy="8" r="1.4" fill="#ddd"/>
+      <circle cx="14" cy="8" r="1.4" fill="#ddd"/>
+      <circle cx="19" cy="2" r="3" fill="#e8b730"/>
+    </g>
+
+    <!-- Error -->
+    <g transform="translate(220, 18)">
+      <rect x="0" y="1" width="20" height="14" rx="2.5" fill="none" stroke="#e8b730" stroke-width="1.2"/>
+      <circle cx="6" cy="8" r="1.4" fill="#e8b730"/>
+      <circle cx="10" cy="8" r="1.4" fill="#e8b730"/>
+      <circle cx="14" cy="8" r="1.4" fill="#e8b730"/>
+      <circle cx="19" cy="2" r="3" fill="#e8b730"/>
+    </g>
+
+    <text class="label" x="20" y="50">Normal</text>
+    <text class="label" x="118" y="50">Pending</text>
+    <text class="label" x="222" y="50">Error</text>
+  </g>
+
+  <!-- ===== 16x16 Actual Size ===== -->
+  <g transform="translate(20, 100)">
+    <text class="section-title" x="0" y="0">Actual size (16×16)</text>
+
+    <rect x="0" y="12" width="16" height="16" rx="3" fill="none" stroke="#ddd" stroke-width="0.8"/>
+    <circle cx="5" cy="20" r="1.2" fill="#ddd"/>
+    <circle cx="8" cy="20" r="1.2" fill="#ddd"/>
+    <circle cx="11" cy="20" r="1.2" fill="#ddd"/>
+    <text class="label" x="22" y="24">normal</text>
+
+    <rect x="90" y="12" width="16" height="16" rx="3" fill="none" stroke="#ddd" stroke-width="0.8"/>
+    <circle cx="95" cy="20" r="1.2" fill="#ddd"/>
+    <circle cx="98" cy="20" r="1.2" fill="#ddd"/>
+    <circle cx="101" cy="20" r="1.2" fill="#ddd"/>
+    <circle cx="104" cy="13.5" r="2.5" fill="#e8b730"/>
+    <text class="label" x="112" y="24">pending</text>
+
+    <rect x="190" y="12" width="16" height="16" rx="3" fill="none" stroke="#e8b730" stroke-width="0.8"/>
+    <circle cx="195" cy="20" r="1.2" fill="#e8b730"/>
+    <circle cx="198" cy="20" r="1.2" fill="#e8b730"/>
+    <circle cx="201" cy="20" r="1.2" fill="#e8b730"/>
+    <circle cx="204" cy="13.5" r="2.5" fill="#e8b730"/>
+    <text class="label" x="212" y="24">error</text>
+  </g>
+
+  <!-- ===== Enlarged 64x64 ===== -->
+  <g transform="translate(20, 155)">
+    <text class="section-title" x="0" y="0">Enlarged (64×64)</text>
+
+    <!-- Normal -->
+    <rect x="0" y="14" width="64" height="64" rx="8" fill="#2a2a2a"/>
+    <rect x="10" y="24" width="44" height="44" rx="8" fill="none" stroke="#ddd" stroke-width="2.5"/>
+    <circle cx="22" cy="46" r="3.5" fill="#ddd"/>
+    <circle cx="32" cy="46" r="3.5" fill="#ddd"/>
+    <circle cx="42" cy="46" r="3.5" fill="#ddd"/>
+    <text class="label" x="16" y="92">Normal</text>
+
+    <!-- Pending -->
+    <rect x="90" y="14" width="64" height="64" rx="8" fill="#2a2a2a"/>
+    <rect x="100" y="24" width="44" height="44" rx="8" fill="none" stroke="#ddd" stroke-width="2.5"/>
+    <circle cx="112" cy="46" r="3.5" fill="#ddd"/>
+    <circle cx="122" cy="46" r="3.5" fill="#ddd"/>
+    <circle cx="132" cy="46" r="3.5" fill="#ddd"/>
+    <circle cx="140" cy="28" r="7" fill="#e8b730"/>
+    <text class="label" x="104" y="92">Pending</text>
+
+    <!-- Error -->
+    <rect x="180" y="14" width="64" height="64" rx="8" fill="#2a2a2a"/>
+    <rect x="190" y="24" width="44" height="44" rx="8" fill="none" stroke="#e8b730" stroke-width="2.5"/>
+    <circle cx="202" cy="46" r="3.5" fill="#e8b730"/>
+    <circle cx="212" cy="46" r="3.5" fill="#e8b730"/>
+    <circle cx="222" cy="46" r="3.5" fill="#e8b730"/>
+    <circle cx="230" cy="28" r="7" fill="#e8b730"/>
+    <text class="label" x="198" y="92">Error</text>
+
+    <!-- Offline -->
+    <rect x="270" y="14" width="64" height="64" rx="8" fill="#2a2a2a"/>
+    <rect x="280" y="24" width="44" height="44" rx="8" fill="none" stroke="#555" stroke-width="2.5" stroke-dasharray="5,4"/>
+    <circle cx="292" cy="46" r="3.5" fill="#555"/>
+    <circle cx="302" cy="46" r="3.5" fill="#555"/>
+    <circle cx="312" cy="46" r="3.5" fill="#555"/>
+    <text class="label" x="284" y="92">Offline</text>
+  </g>
+</svg>

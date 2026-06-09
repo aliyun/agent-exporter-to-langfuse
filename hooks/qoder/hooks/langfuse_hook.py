@@ -17,6 +17,14 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# --- Delivery layer (langstash → direct push → failed log) ---
+try:
+    from langstash_deliver.deliver import deliver_trace
+    from langstash_deliver.schema import build_trace_json, build_generation, build_span, Usage
+    _HAS_DELIVER = True
+except ImportError:
+    _HAS_DELIVER = False
+
 # --- Langfuse import (fail-open) ---
 try:
     from langfuse import Langfuse, propagate_attributes
@@ -441,7 +449,7 @@ def get_model(msg: Dict[str, Any]) -> str:
             return v
     return ""
 
-def get_usage(msg: Dict[str, Any]) -> Optional[Dict[str, int]]:
+def get_usage(msg: Dict[str, Any]) -> Optional["Usage"]:
     """Extract token usage from an assistant message, if present."""
     m = msg.get("message")
     if not isinstance(m, dict):
@@ -449,7 +457,7 @@ def get_usage(msg: Dict[str, Any]) -> Optional[Dict[str, int]]:
     u = m.get("usage")
     if not isinstance(u, dict):
         return None
-    details: Dict[str, int] = {}
+    details: Usage = {}
     for src, dst in (
         ("input_tokens", "input"),
         ("output_tokens", "output"),
@@ -968,6 +976,119 @@ def resolve_user_id(ctx: HookContext) -> Optional[str]:
     except Exception:
         return None
 
+# ----------------- Trace Schema v2 builder -----------------
+def _build_trace_v2(ctx: HookContext, turn_num: int, turn: Turn,
+                    user_id: Optional[str], tags: List[str],
+                    db_tokens: Optional[List[TokenInfo]] = None, db_used: Optional[set] = None) -> Dict[str, Any]:
+    user_text, _ = truncate_text(extract_text(get_content(turn.user_msg)))
+    last_assistant = turn.assistant_msgs[-1]
+    final_text, _ = truncate_text(extract_text(get_content(last_assistant)))
+
+    user_ts = parse_ts(turn.user_msg)
+    last_ts = parse_ts({"timestamp": last_assistant.get("end_timestamp")}) if last_assistant.get("end_timestamp") else parse_ts(last_assistant)
+    candidate_end = [t for t in [last_ts] if t is not None]
+    for tr in turn.tool_results_by_id.values():
+        t = parse_ts(tr)
+        if t is not None:
+            candidate_end.append(t)
+    turn_end = max(candidate_end) if candidate_end else None
+
+    is_subagent = ctx.hook_event == "SubagentStop"
+    trace_label = f"Qoder - Subagent Turn {turn_num}" if is_subagent else f"Qoder - Turn {turn_num}"
+
+    trace_meta: Dict[str, Any] = {
+        "source": "qoder-subagent" if is_subagent else "qoder",
+        "turn_number": turn_num, "is_subagent": is_subagent,
+        "assistant_message_count": len(turn.assistant_msgs),
+        "transcript_path": str(ctx.transcript_path),
+    }
+    for k, v in [("cwd", ctx.cwd), ("repo", ctx.repo), ("branch", ctx.branch),
+                 ("email", ctx.email), ("org_name", ctx.org_name), ("user_uid", ctx.user_uid),
+                 ("agent_id", ctx.agent_id), ("agent_type", ctx.agent_type)]:
+        if v:
+            trace_meta[k] = v
+
+    generations: List[Dict[str, Any]] = []
+    spans: List[Dict[str, Any]] = []
+    prev_ts = user_ts
+
+    for idx, am in enumerate(turn.assistant_msgs):
+        am_ts = parse_ts(am)
+        am_end_ts = parse_ts({"timestamp": am.get("end_timestamp")}) if am.get("end_timestamp") else am_ts
+        am_text, _ = truncate_text(extract_text(get_content(am)))
+        model = get_model(am)
+        tool_uses = iter_tool_uses(get_content(am))
+
+        gen_input: Any = {"role": "user", "content": user_text} if idx == 0 else None
+
+        gen_tool_calls = []
+        for tu in tool_uses:
+            tu_inp = tu.get("input")
+            if isinstance(tu_inp, str):
+                tu_inp, _ = truncate_text(tu_inp)
+            gen_tool_calls.append({"id": tu.get("id"), "name": tu.get("name"), "input": tu_inp})
+
+        gen_output: Dict[str, Any] = {"role": "assistant"}
+        if am_text:
+            gen_output["content"] = am_text
+        if gen_tool_calls:
+            gen_output["tool_calls"] = gen_tool_calls
+
+        db_token = match_db_token(db_tokens or [], am_ts, db_used) if db_used is not None else None
+        if db_token and db_token.model_key and not model:
+            model = db_token.model_key
+
+        usage = get_usage(am)
+        if usage is None and db_token:
+            usage = {"input": db_token.input_tokens, "output": db_token.output_tokens}
+            if db_token.cached_tokens > 0:
+                usage["cache_read_input_tokens"] = db_token.cached_tokens
+
+        gen = build_generation(
+            name=f"Qoder Generation {idx + 1}", model=model or "unknown",
+            start_time=prev_ts or am_ts, end_time=am_end_ts or am_ts,
+            gen_input=gen_input, gen_output=gen_output,
+            usage=usage, metadata={"assistant_index": idx, "tool_count": len(tool_uses)},
+        )
+        generations.append(gen)
+
+        batch_end: List[datetime] = []
+        for tu in tool_uses:
+            tid = str(tu.get("id") or "")
+            tname = tu.get("name") or "unknown"
+            tinput_raw = tu.get("input") if isinstance(tu.get("input"), (dict, list, str, int, float, bool)) else {}
+            tinput = truncate_text(tinput_raw)[0] if isinstance(tinput_raw, str) else tinput_raw
+            tr_entry = turn.tool_results_by_id.get(tid)
+            out_trunc, tr_ts = None, None
+            if tr_entry:
+                out_raw = tr_entry.get("content")
+                out_str = out_raw if isinstance(out_raw, str) else json.dumps(out_raw, ensure_ascii=False)
+                out_trunc, _ = truncate_text(out_str)
+                tr_ts = parse_ts(tr_entry.get("timestamp"))
+            if tr_ts:
+                batch_end.append(tr_ts)
+            spans.append(build_span(
+                name=f"Tool: {tname}", generation_index=idx,
+                start_time=am_ts, end_time=tr_ts or am_ts,
+                span_input=tinput, span_output=out_trunc,
+                metadata={"tool_name": tname, "tool_id": tid},
+            ))
+
+        if batch_end:
+            prev_ts = max(batch_end)
+        elif am_end_ts:
+            prev_ts = am_end_ts
+        elif am_ts:
+            prev_ts = am_ts
+
+    return build_trace_json(
+        source="qoder", session_id=ctx.session_id, user_id=user_id, tags=tags,
+        trace_name=trace_label, start_time=user_ts, end_time=turn_end,
+        user_input={"role": "user", "content": user_text},
+        assistant_output={"role": "assistant", "content": final_text},
+        metadata=trace_meta, generations=generations, spans=spans,
+    )
+
 # ----------------- Main -----------------
 def main() -> int:
     start = time.time()
@@ -1037,10 +1158,30 @@ def main() -> int:
             for t in turns:
                 emitted += 1
                 turn_num = ss.turn_count + emitted
-                try:
-                    emit_turn(langfuse, ctx, turn_num, t, user_id=user_id, tags=tags, db_tokens=db_tokens or None, db_used=db_used)
-                except Exception as e:
-                    info(f"emit_turn failed: {type(e).__name__}: {e}")
+
+                if _HAS_DELIVER:
+                    try:
+                        trace_json = _build_trace_v2(ctx, turn_num, t, user_id=user_id, tags=tags,
+                                                     db_tokens=db_tokens or None, db_used=db_used)
+                    except Exception as e:
+                        debug(f"_build_trace_v2 failed: {e}")
+                        trace_json = None
+
+                    def _direct_push(_tj, _t=t, _turn_num=turn_num):
+                        emit_turn(langfuse, ctx, _turn_num, _t, user_id=user_id, tags=tags,
+                                  db_tokens=db_tokens or None, db_used=db_used)
+                        return True
+
+                    if trace_json:
+                        deliver_trace(trace_json, direct_push_fn=_direct_push)
+                    else:
+                        _direct_push(None)
+                else:
+                    try:
+                        emit_turn(langfuse, ctx, turn_num, t, user_id=user_id, tags=tags,
+                                  db_tokens=db_tokens or None, db_used=db_used)
+                    except Exception as e:
+                        info(f"emit_turn failed: {type(e).__name__}: {e}")
 
             ss.turn_count += emitted
             write_session_state(state, key, ss)
