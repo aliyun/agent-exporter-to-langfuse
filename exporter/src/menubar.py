@@ -118,15 +118,19 @@ class LangstashApp(rumps.App):
         stor.set_callback(None)
         self.menu.add(stor)
 
-        # Version
+        # Version & upgrade
         ver = self._stats.get("current_version", "")
         if ver:
-            ver_label = f"v{ver}"
-            if self._stats.get("update_available"):
-                ver_label += f" → v{self._stats.get('latest_version', '?')}"
-            ver_item = rumps.MenuItem(ver_label)
+            ver_item = rumps.MenuItem(f"v{ver}")
             ver_item.set_callback(None)
             self.menu.add(ver_item)
+            if self._stats.get("update_available"):
+                latest = self._stats.get("latest_version", "?")
+                upgrade_item = rumps.MenuItem(
+                    f"Upgrade to v{latest}",
+                    callback=self._do_upgrade,
+                )
+                self.menu.add(upgrade_item)
 
         self.menu.add(rumps.separator)
         self.menu.add(rumps.MenuItem("Open Web UI", callback=self._open_webui))
@@ -142,6 +146,22 @@ class LangstashApp(rumps.App):
         set_config_value("update", "include_prerelease", self._include_prerelease)
         if self._updater:
             self._updater._include_prerelease = self._include_prerelease
+
+    def _do_upgrade(self, _sender: Any = None) -> None:
+        try:
+            req = urllib.request.Request(
+                f"{self.server_url}/upgrade",
+                data=b"",
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            if data.get("status") == "started":
+                rumps.notification("Langstash", "", f"Upgrading to v{data.get('upgrading_to', '?')}...")
+            elif data.get("status") == "up_to_date":
+                rumps.notification("Langstash", "", "Already up to date.")
+        except Exception as e:
+            rumps.notification("Langstash", "", f"Upgrade failed: {e}")
 
     def _open_webui(self, _sender: Any = None) -> None:
         """Open the web UI in the default browser."""

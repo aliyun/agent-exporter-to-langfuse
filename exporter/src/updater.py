@@ -1,5 +1,6 @@
 import logging
 import re
+import subprocess
 import threading
 import time
 import urllib.request
@@ -83,6 +84,28 @@ def get_update_info() -> dict[str, Any]:
         "current_version": local,
         "latest_version": cached.get("REMOTE_VERSION", local),
     }
+
+
+UPGRADE_LOG = INSTALL_DIR / "logs" / "upgrade.log"
+
+
+def start_upgrade(include_prerelease: bool = False) -> bool:
+    upgrade_script = INSTALL_DIR / "upgrade.sh"
+    if not upgrade_script.exists():
+        return False
+    cmd = ["bash", str(upgrade_script)]
+    if include_prerelease:
+        cmd.append("--pre-release")
+    UPGRADE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(UPGRADE_LOG, "w") as log:
+        subprocess.Popen(
+            cmd,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            cwd=str(INSTALL_DIR),
+        )
+    return True
 
 
 class Updater:

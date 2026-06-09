@@ -13,7 +13,7 @@ from src.config import Config
 from src.ingestor import IngestError, ingest
 from src.state import IngestState, SenderState
 from src.stats import Stats
-from src.updater import get_update_info
+from src.updater import get_update_info, start_upgrade
 
 logger = logging.getLogger("langstash.server")
 
@@ -111,6 +111,16 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
             "langfuse_configured": healthy,
         }, status_code=status_code)
 
+    @app.post("/upgrade")
+    async def post_upgrade() -> JSONResponse:
+        info = get_update_info()
+        if not info.get("update_available"):
+            return JSONResponse({"status": "up_to_date"})
+        started = start_upgrade(include_prerelease=config.update.include_prerelease)
+        if not started:
+            return JSONResponse({"status": "error", "message": "upgrade script not found"}, status_code=500)
+        return JSONResponse({"status": "started", "upgrading_to": info.get("latest_version", "")})
+
     @app.get("/favicon.svg")
     async def get_favicon() -> FileResponse:
         return FileResponse(ASSETS_DIR / "icon.svg", media_type="image/svg+xml")
@@ -135,7 +145,9 @@ body{font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;backgro
 .header{display:flex;justify-content:space-between;align-items:center;padding:16px 0;border-bottom:1px solid #333;margin-bottom:20px}
 .header h1{font-size:20px;font-weight:600}
 .version{font-size:13px;color:#888}
-.update-badge{background:#2d6a2d;color:#8f8;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px}
+.update-badge{background:#2d6a2d;color:#8f8;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px;cursor:pointer}
+.update-badge:hover{background:#3a8a3a}
+.update-badge.upgrading{background:#6a5a2d;color:#ee8;cursor:wait}
 .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
 .card{background:#262626;border-radius:8px;padding:16px;text-align:center}
 .card .icon{font-size:20px;margin-bottom:4px}
@@ -216,9 +228,33 @@ async function poll(){
     const bar=$('bar');bar.style.width=Math.min(pct,100)+'%';
     bar.className='bar-fill'+(pct>95?' crit':pct>80?' warn':'');
     let v='v'+d.current_version;
-    if(d.update_available)v+=' <span class="update-badge">Update: v'+d.latest_version+'</span>';
-    $('ver').innerHTML=v;
+    if(d.update_available&&!window._upgrading)v+=' <span class="update-badge" onclick="doUpgrade()" title="Click to upgrade">Upgrade to v'+d.latest_version+'</span>';
+    if(!window._upgrading)$('ver').innerHTML=v;
   }catch(e){$('v-traces').textContent='--'}
+}
+async function doUpgrade(){
+  if(window._upgrading)return;
+  window._upgrading=true;
+  $('ver').innerHTML=$('ver').textContent.replace(/Upgrade to.*/,'')+'<span class="update-badge upgrading">Upgrading...</span>';
+  try{
+    const r=await fetch('/upgrade',{method:'POST'});
+    const d=await r.json();
+    if(d.status==='up_to_date'){window._upgrading=false;return}
+    if(d.status!=='started'){$('ver').innerHTML+=' <span style="color:#f66">'+d.message+'</span>';window._upgrading=false;return}
+    waitRestart(d.upgrading_to);
+  }catch(e){$('ver').innerHTML+=' <span style="color:#f66">Error</span>';window._upgrading=false}
+}
+function waitRestart(targetVer){
+  let t=0;
+  const iv=setInterval(async()=>{
+    t+=2;
+    if(t>120){clearInterval(iv);$('ver').innerHTML='<span style="color:#f66">Upgrade timeout</span>';window._upgrading=false;return}
+    try{
+      const r=await fetch('/health');const d=await r.json();
+      if(d.version&&d.version!==targetVer&&t<10)return;
+      clearInterval(iv);location.reload();
+    }catch(e){$('ver').innerHTML='<span class="update-badge upgrading">Restarting...</span>'}
+  },2000);
 }
 poll();setInterval(poll,10000);
 </script>

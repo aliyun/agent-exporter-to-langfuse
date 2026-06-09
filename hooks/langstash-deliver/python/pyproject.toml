@@ -1,6 +1,6 @@
 [project]
 name = "langstash-deliver"
-dynamic = ["version"]
+version = "0.1.0"
 description = "Delivery layer for Agent Exporter to Langfuse hooks (Python)"
 requires-python = ">=3.11"
 dependencies = []
@@ -8,10 +8,6 @@ dependencies = []
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.version]
-path = "../../../VERSION"
-pattern = "(?P<version>\\d+\\.\\d+\\.\\d+)"
 
 [tool.hatch.build.targets.wheel]
 packages = ["langstash_deliver"]

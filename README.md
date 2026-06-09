@@ -59,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/aliyun/agent-exporter-to-langfuse/m
   --public-key pk-lf-*** \
   --secret-key sk-lf-*** \
   --base-url http://LANGFUSE_HOST:LANGFUSE_PORT \
-  --user-id USER_NAME \
+  --user-id USER_ID \
   --tags TAGS
 ```
 
