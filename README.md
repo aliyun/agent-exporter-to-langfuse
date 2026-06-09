@@ -54,10 +54,12 @@ curl -fsSL https://raw.githubusercontent.com/aliyun/agent-exporter-to-langfuse/m
 With credentials (non-interactive):
 
 ```bash
-LANGFUSE_PUBLIC_KEY=pk-lf-*** \
-LANGFUSE_SECRET_KEY=sk-lf-*** \
-LANGFUSE_BASE_URL=http://LANGFUSE_HOST:LANGFUSE_PORT \
-curl -fsSL https://raw.githubusercontent.com/aliyun/agent-exporter-to-langfuse/main/install-remote.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aliyun/agent-exporter-to-langfuse/main/install-remote.sh | bash -s -- \
+  --public-key pk-lf-*** \
+  --secret-key sk-lf-*** \
+  --base-url http://LANGFUSE_HOST:LANGFUSE_PORT \
+  --user-id USER_NAME \
+  --tags TAGS
 ```
 
 Or clone and install manually:
