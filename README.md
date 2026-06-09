@@ -45,6 +45,13 @@ See the README in each directory for detailed configuration and usage instructio
 
 ## Install
 
+> **Users in mainland China**: if PyPI downloads time out, set a mirror and timeout before installing:
+>
+> ```bash
+> export UV_HTTP_TIMEOUT=1200
+> export UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+> ```
+
 One-line install (requires `git`):
 
 ```bash
