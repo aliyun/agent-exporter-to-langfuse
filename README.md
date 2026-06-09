@@ -14,9 +14,9 @@ Export AI Agent session observability data (conversation turns, model calls, too
 ┌─────────────────────────────────────────────────────────┐
 │                   langstash-deliver                     │
 │  Three-tier delivery:                                   │
-│    1. langstash (local buffer) ─► preferred              │
-│    2. Langfuse SDK (direct push) ─► fallback             │
-│    3. Failed log (~/.agent-exporter-to-langfuse/data/)   │
+│    1. langstash (local buffer) ─► preferred             │
+│    2. Langfuse SDK (direct push) ─► fallback            │
+│    3. Failed log (~/.agent-exporter-to-langfuse/data/)  │
 └────────┬──────────────────────┬─────────────────────────┘
          │ POST /ingest         │ Direct SDK push
          ▼                      ▼
