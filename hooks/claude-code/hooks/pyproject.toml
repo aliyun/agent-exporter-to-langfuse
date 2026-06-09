@@ -1,12 +1,20 @@
 [project]
 name = "hooks"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Claude Code Langfuse exporter hook"
 requires-python = ">=3.11"
 dependencies = [
     "langfuse>=4.7.0",
     "langstash-deliver",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "../../../VERSION"
+pattern = "(?P<version>\\d+\\.\\d+\\.\\d+)"
 
 [tool.uv.sources]
 langstash-deliver = { path = "../../langstash-deliver/python" }
