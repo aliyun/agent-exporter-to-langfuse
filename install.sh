@@ -84,6 +84,7 @@ if [ "$CURRENT" != "$CANONICAL" ] && [ "$CURRENT" != "$INSTALL_DIR" ]; then
         cp -R "$SCRIPT_DIR/"* "$INSTALL_DIR/"
     fi
     info "Synced. Switching to $INSTALL_DIR"
+    export LANGFUSE_SECRET_KEY LANGFUSE_PUBLIC_KEY LANGFUSE_BASE_URL LANGFUSE_USER_ID LANGFUSE_TAGS
     exec bash "$INSTALL_DIR/install.sh" "$@"
 fi
 
