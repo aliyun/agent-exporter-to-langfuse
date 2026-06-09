@@ -48,12 +48,6 @@ See the README in each directory for detailed configuration and usage instructio
 One-line install (requires `git`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aliyun/agent-exporter-to-langfuse/main/install-remote.sh | bash
-```
-
-With credentials (non-interactive):
-
-```bash
 curl -fsSL https://raw.githubusercontent.com/aliyun/agent-exporter-to-langfuse/main/install-remote.sh | bash -s -- \
   --public-key pk-lf-*** \
   --secret-key sk-lf-*** \
@@ -62,34 +56,13 @@ curl -fsSL https://raw.githubusercontent.com/aliyun/agent-exporter-to-langfuse/m
   --tags TAGS
 ```
 
-Or clone and install manually:
-
-```bash
-git clone https://github.com/aliyun/agent-exporter-to-langfuse.git
-cd agent-exporter-to-langfuse
-bash install.sh
-```
-
-Or pass all parameters for non-interactive installation:
-
-```bash
-LANGFUSE_PUBLIC_KEY=pk-lf-*** \
-LANGFUSE_SECRET_KEY=sk-lf-*** \
-LANGFUSE_BASE_URL=http://LANGFUSE_HOST:LANGFUSE_PORT \
-LANGFUSE_USER_ID=USER_ID \
-LANGFUSE_TAGS=team:clickhouse,env:personal \
-bash install.sh
-```
-
-### Configuration
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `LANGFUSE_PUBLIC_KEY` | Yes | Your Langfuse public key (pk-lf-...) |
-| `LANGFUSE_SECRET_KEY` | Yes | Your Langfuse secret key (sk-lf-...) |
-| `LANGFUSE_BASE_URL` | Yes | Langfuse host URL |
-| `LANGFUSE_USER_ID` | No | User identifier for traces. Defaults to OS username. |
-| `LANGFUSE_TAGS` | No | Extra tags (comma-separated). Agent name is always included automatically. |
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `--public-key` | Yes | Langfuse public key (`pk-lf-...`) |
+| `--secret-key` | Yes | Langfuse secret key (`sk-lf-...`) |
+| `--base-url` | Yes | Langfuse server URL |
+| `--user-id` | No | User identifier for traces. Defaults to OS username. |
+| `--tags` | No | Extra tags (comma-separated, e.g. `team:olap,env:prod`). Agent name is always included automatically. |
 
 ## Uninstall
 
