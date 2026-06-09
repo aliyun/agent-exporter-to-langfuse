@@ -27,7 +27,7 @@ UV_EXTRAS=""
 if [ "$(uname)" = "Darwin" ]; then
     UV_EXTRAS="--extra macos"
 fi
-(cd "$EXPORTER_DIR" && uv sync --quiet $UV_EXTRAS 2>&1) || {
+(cd "$EXPORTER_DIR" && uv sync $UV_EXTRAS 2>&1) || {
     warn "uv sync failed, langstash will not be available"
     return 0 2>/dev/null || exit 0
 }
