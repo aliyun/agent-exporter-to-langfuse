@@ -27,6 +27,11 @@ class LastError:
 class IngestState:
     next_seq_id: int = 1
     files: dict[str, FileEntry] = field(default_factory=dict)
+    tokens_date: str = ""
+    tokens_input: int = 0
+    tokens_output: int = 0
+    tokens_cache_read: int = 0
+    tokens_cache_creation: int = 0
 
 
 @dataclass
@@ -60,6 +65,13 @@ def load_ingest_state(path: Path) -> IngestState:
                 min_seq=int(entry.get("min_seq", 0)),
                 max_seq=int(entry.get("max_seq", 0)),
             )
+    tokens = raw.get("tokens_today", {})
+    if isinstance(tokens, dict):
+        s.tokens_date = tokens.get("date", "")
+        s.tokens_input = int(tokens.get("input", 0))
+        s.tokens_output = int(tokens.get("output", 0))
+        s.tokens_cache_read = int(tokens.get("cache_read", 0))
+        s.tokens_cache_creation = int(tokens.get("cache_creation", 0))
     return s
 
 
@@ -67,6 +79,13 @@ def save_ingest_state(path: Path, state: IngestState) -> None:
     data: dict[str, Any] = {
         "next_seq_id": state.next_seq_id,
         "files": {},
+        "tokens_today": {
+            "date": state.tokens_date,
+            "input": state.tokens_input,
+            "output": state.tokens_output,
+            "cache_read": state.tokens_cache_read,
+            "cache_creation": state.tokens_cache_creation,
+        },
     }
     for name, entry in state.files.items():
         data["files"][name] = {

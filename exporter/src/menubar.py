@@ -55,13 +55,10 @@ class LangstashApp(rumps.App):
         self._rebuild_menu()
 
     def _update_title(self) -> None:
-        """Set the status bar title based on pending/failed counts."""
+        """Set the status bar title based on pending count."""
         pending = self._stats.get("pending_count", 0)
-        failed = self._stats.get("failed_count", 0)
 
-        if failed > 0:
-            self.title = f"⚠{failed}"
-        elif pending > 0:
+        if pending > 0:
             self.title = str(pending)
         else:
             self.title = ""
@@ -79,14 +76,13 @@ class LangstashApp(rumps.App):
             return
 
         # Counts
-        traces = self._stats.get("traces_today", 0)
-        sent = self._stats.get("sent_today", 0)
+        traces = self._stats.get("total_traces", 0)
+        sent = self._stats.get("total_sent", 0)
         pending = self._stats.get("pending_count", 0)
-        failed = self._stats.get("failed_count", 0)
 
         header = rumps.MenuItem(
             f"Traces: {_fmt_count(traces)}  Sent: {_fmt_count(sent)}  "
-            f"Pending: {_fmt_count(pending)}  Failed: {_fmt_count(failed)}"
+            f"Pending: {_fmt_count(pending)}"
         )
         header.set_callback(None)
         self.menu.add(header)

@@ -7,6 +7,7 @@ import uvicorn
 
 from src.cleaner import Cleaner
 from src.config import load_config
+from src.ingestor import FailedRecovery
 from src.sender import Sender
 from src.server import create_app
 from src.state import (
@@ -69,12 +70,15 @@ def cli() -> None:
     stats = Stats()
 
     sender = Sender(config.langfuse, config.sender, data_dir,
-                    sender_state, sender_state_path, ingest_state_path, stats)
+                    sender_state, sender_state_path, ingest_state_path)
     sender.start()
 
     cleaner = Cleaner(data_dir, ingest_state, ingest_state_path,
                       sender_state_path, config.storage)
     cleaner.start()
+
+    recovery = FailedRecovery(data_dir, ingest_state, ingest_state_path)
+    recovery.start()
 
     updater = Updater(include_prerelease=config.update.include_prerelease)
     updater.start()

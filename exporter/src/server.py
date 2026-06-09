@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +36,6 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
             seq_id = ingest(body, ingest_state, data_dir, ingest_state_path)
         except IngestError as e:
             return JSONResponse({"status": "rejected", "error": e.message}, status_code=e.status)
-        stats.record_ingest(body)
         return JSONResponse({"status": "accepted", "seq_id": seq_id}, status_code=202)
 
     @app.post("/ingest/batch")
@@ -52,25 +52,52 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
             try:
                 seq_id = ingest(t, ingest_state, data_dir, ingest_state_path)
                 ids.append(seq_id)
-                stats.record_ingest(t)
             except IngestError as e:
                 logger.warning("batch ingest skip: %s", e.message)
         return JSONResponse({"status": "accepted", "count": len(ids), "seq_ids": ids}, status_code=202)
 
     @app.get("/stats")
     async def get_stats() -> JSONResponse:
-        pending = ingest_state.next_seq_id - sender_state.commit_id - 1
+        total_traces = ingest_state.next_seq_id - 1
+        total_sent = sender_state.commit_id
+        pending = total_traces - total_sent
         if pending < 0:
             pending = 0
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_file = data_dir / "pending" / f"{today}.jsonl"
+        traces_today = sum(1 for line in open(today_file, encoding="utf-8") if line.strip()) if today_file.exists() else 0
+        tokens_today: dict[str, int] = {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0}
+        if ingest_state.tokens_date == today:
+            tokens_today = {
+                "input": ingest_state.tokens_input,
+                "output": ingest_state.tokens_output,
+                "cache_read": ingest_state.tokens_cache_read,
+                "cache_creation": ingest_state.tokens_cache_creation,
+            }
         storage_mb = _dir_size_mb(data_dir)
-        update_info = get_update_info()
-        result = stats.to_dict(
-            pending_count=pending,
-            storage_used_mb=storage_mb,
-            last_error=sender_state.last_error,
-            last_commit_at=sender_state.last_commit_at,
-            update_info=update_info,
-        )
+        update_info = get_update_info() or {}
+        result: dict[str, Any] = {
+            "total_traces": total_traces,
+            "total_sent": total_sent,
+            "pending_count": pending,
+            "traces_today": traces_today,
+            "tokens_today": tokens_today,
+            "last_success_at": sender_state.last_commit_at or None,
+            "last_error": None,
+            "storage_used_mb": round(storage_mb, 2),
+            "uptime_seconds": stats.uptime_seconds,
+            "update_available": False,
+            "current_version": "",
+            "latest_version": "",
+        }
+        if sender_state.last_error:
+            result["last_error"] = {
+                "time": sender_state.last_error.time,
+                "seq_id": sender_state.last_error.seq_id,
+                "error": sender_state.last_error.error,
+                "retries": sender_state.last_error.retries,
+            }
+        result.update(update_info)
         return JSONResponse(result)
 
     @app.get("/health")
@@ -109,7 +136,7 @@ body{font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;backgro
 .header h1{font-size:20px;font-weight:600}
 .version{font-size:13px;color:#888}
 .update-badge{background:#2d6a2d;color:#8f8;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px}
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
 .card{background:#262626;border-radius:8px;padding:16px;text-align:center}
 .card .icon{font-size:20px;margin-bottom:4px}
 .card .value{font-size:28px;font-weight:700}
@@ -136,14 +163,14 @@ body{font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;backgro
   <span class="version" id="ver"></span>
 </div>
 <div class="cards">
-  <div class="card" id="c-traces"><div class="icon">&#9670;</div><div class="value" id="v-traces">-</div><div class="label">traces today</div></div>
+  <div class="card" id="c-traces"><div class="icon">&#9670;</div><div class="value" id="v-traces">-</div><div class="label">total traces</div></div>
   <div class="card" id="c-sent"><div class="icon">&uarr;</div><div class="value" id="v-sent">-</div><div class="label">sent</div></div>
   <div class="card" id="c-pending"><div class="icon">&#9203;</div><div class="value" id="v-pending">-</div><div class="label">pending</div></div>
-  <div class="card" id="c-failed"><div class="icon">&#9888;</div><div class="value" id="v-failed">-</div><div class="label">failed</div></div>
 </div>
 <div class="section">
-  <h3>Tokens Today</h3>
-  <div class="tokens">
+  <h3>Today</h3>
+  <div class="tokens" style="grid-template-columns:repeat(5,1fr)">
+    <div><div class="tv" id="v-tday">-</div><div class="tl">Traces</div></div>
     <div><div class="tv" id="v-tin">-</div><div class="tl">Input</div></div>
     <div><div class="tv" id="v-tout">-</div><div class="tl">Output</div></div>
     <div><div class="tv" id="v-tcr">-</div><div class="tl">Cache Read</div></div>
@@ -169,12 +196,11 @@ const up=s=>{const h=Math.floor(s/3600);const m=Math.floor(s%3600/60);return h+'
 async function poll(){
   try{
     const r=await fetch('/stats');const d=await r.json();
-    $('v-traces').textContent=d.traces_today;
-    $('v-sent').textContent=d.sent_today;
-    $('v-pending').textContent=d.pending_count;
+    $('v-traces').textContent=fmt(d.total_traces);
+    $('v-sent').textContent=fmt(d.total_sent);
+    $('v-pending').textContent=fmt(d.pending_count);
     $('c-pending').className='card'+(d.pending_count>0?' warn':'');
-    $('v-failed').textContent=d.failed_count;
-    $('c-failed').className='card'+(d.failed_count>0?' error':'');
+    $('v-tday').textContent=d.traces_today;
     $('v-tin').textContent=fmt(d.tokens_today?.input||0);
     $('v-tout').textContent=fmt(d.tokens_today?.output||0);
     $('v-tcr').textContent=fmt(d.tokens_today?.cache_read||0);

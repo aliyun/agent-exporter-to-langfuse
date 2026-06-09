@@ -12,7 +12,6 @@ from src.state import (
     IngestState, SenderState,
     load_ingest_state, record_commit, record_error, save_sender_state,
 )
-from src.stats import Stats
 
 logger = logging.getLogger("langstash.sender")
 
@@ -127,14 +126,13 @@ def _read_pending_traces(
 class Sender:
     def __init__(self, langfuse_cfg: LangfuseConfig, sender_cfg: SenderConfig,
                  data_dir: Path, sender_state: SenderState, sender_state_path: Path,
-                 ingest_state_path: Path, stats: Stats):
+                 ingest_state_path: Path):
         self._langfuse = langfuse_cfg
         self._cfg = sender_cfg
         self._data_dir = data_dir
         self._state = sender_state
         self._state_path = sender_state_path
         self._ingest_state_path = ingest_state_path
-        self._stats = stats
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._backoff = sender_cfg.interval_seconds
@@ -197,7 +195,6 @@ class Sender:
         if 200 <= resp.status_code < 300:
             record_commit(self._state, max_seq)
             save_sender_state(self._state_path, self._state)
-            self._stats.record_sent(len(traces))
             logger.info("sent %d traces (commit_id=%d)", len(traces), max_seq)
             return True
 

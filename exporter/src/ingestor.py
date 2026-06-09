@@ -1,6 +1,7 @@
 import fcntl
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,8 @@ logger = logging.getLogger("langstash.ingestor")
 MAX_BODY_BYTES = 10 * 1024 * 1024
 
 REQUIRED_FIELDS_TRACE = ("name", "start_time", "end_time")
+
+RECOVER_INTERVAL = 60
 
 
 class IngestError(Exception):
@@ -39,6 +42,22 @@ def validate_trace(body: dict[str, Any]) -> None:
     generations = body.get("generations")
     if not isinstance(generations, list) or len(generations) == 0:
         raise IngestError(422, "generations must be a non-empty array")
+
+
+def _accumulate_tokens(state: IngestState, body: dict[str, Any], today: str) -> None:
+    if state.tokens_date != today:
+        state.tokens_date = today
+        state.tokens_input = 0
+        state.tokens_output = 0
+        state.tokens_cache_read = 0
+        state.tokens_cache_creation = 0
+    for gen in body.get("generations", []):
+        usage = gen.get("usage")
+        if isinstance(usage, dict):
+            state.tokens_input += int(usage.get("input", 0))
+            state.tokens_output += int(usage.get("output", 0))
+            state.tokens_cache_read += int(usage.get("cache_read_input_tokens", 0))
+            state.tokens_cache_creation += int(usage.get("cache_creation_input_tokens", 0))
 
 
 def ingest(body: dict[str, Any], state: IngestState, data_dir: Path, state_path: Path) -> int:
@@ -71,7 +90,67 @@ def ingest(body: dict[str, Any], state: IngestState, data_dir: Path, state_path:
             fcntl.flock(f, fcntl.LOCK_UN)
 
     update_file_entry(state, filename, seq_id)
+    _accumulate_tokens(state, body, today)
     save_ingest_state(state_path, state)
 
     logger.debug("ingested seq_id=%d to %s", seq_id, filename)
     return seq_id
+
+
+def recover_failed(data_dir: Path, state: IngestState, state_path: Path) -> int:
+    failed_dir = data_dir / "failed"
+    if not failed_dir.exists():
+        return 0
+
+    recovered = 0
+    for fpath in sorted(failed_dir.glob("*.jsonl")):
+        ok = True
+        with open(fpath, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    body = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                try:
+                    ingest(body, state, data_dir, state_path)
+                    recovered += 1
+                except IngestError as e:
+                    logger.warning("recover skip (%s): %s", fpath.name, e.message)
+                    ok = False
+        if ok:
+            fpath.unlink(missing_ok=True)
+            logger.info("recovered %s", fpath.name)
+    return recovered
+
+
+class FailedRecovery:
+    def __init__(self, data_dir: Path, state: IngestState, state_path: Path):
+        self._data_dir = data_dir
+        self._state = state
+        self._state_path = state_path
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True, name="langstash-recovery")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=5)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self._stop.wait(RECOVER_INTERVAL)
+            if self._stop.is_set():
+                break
+            try:
+                n = recover_failed(self._data_dir, self._state, self._state_path)
+                if n:
+                    logger.info("recovered %d failed traces to pending", n)
+            except Exception as e:
+                logger.error("recovery error: %s", e)
