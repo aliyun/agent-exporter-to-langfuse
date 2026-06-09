@@ -51,6 +51,15 @@ One-line install (requires `git`):
 curl -fsSL https://raw.githubusercontent.com/aliyun/agent-exporter-to-langfuse/main/install-remote.sh | bash
 ```
 
+With credentials (non-interactive):
+
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-*** \
+LANGFUSE_SECRET_KEY=sk-lf-*** \
+LANGFUSE_BASE_URL=http://LANGFUSE_HOST:LANGFUSE_PORT \
+curl -fsSL https://raw.githubusercontent.com/aliyun/agent-exporter-to-langfuse/main/install-remote.sh | bash
+```
+
 Or clone and install manually:
 
 ```bash
