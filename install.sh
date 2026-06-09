@@ -180,7 +180,7 @@ else
     echo ""
     echo -e "  ${DIM}Enter numbers to install (comma-separated), or press Enter for all.${NC}"
     prompt_input "Select agents [1-${#DETECTED_AGENTS[@]}, default: all]: "
-    read -r SELECTION
+    read -r SELECTION </dev/tty
 
     if [ -z "$SELECTION" ] || [ "$SELECTION" = "all" ]; then
         SELECTED_AGENTS=("${DETECTED_AGENTS[@]}")
@@ -263,18 +263,18 @@ if [ -z "$LANGFUSE_SECRET_KEY" ] || [ -z "$LANGFUSE_PUBLIC_KEY" ] || [ -z "$LANG
 
     if [ -z "$LANGFUSE_BASE_URL" ]; then
         prompt_input "Langfuse Base URL [$DEFAULT_BASE_URL]: "
-        read -r INPUT_BASE_URL
+        read -r INPUT_BASE_URL </dev/tty
         LANGFUSE_BASE_URL="${INPUT_BASE_URL:-$DEFAULT_BASE_URL}"
     fi
 
     if [ -z "$LANGFUSE_PUBLIC_KEY" ]; then
         prompt_input "Langfuse Public Key (pk-lf-...): "
-        read -r LANGFUSE_PUBLIC_KEY
+        read -r LANGFUSE_PUBLIC_KEY </dev/tty
     fi
 
     if [ -z "$LANGFUSE_SECRET_KEY" ]; then
         prompt_input "Langfuse Secret Key (sk-lf-...): "
-        read -r LANGFUSE_SECRET_KEY
+        read -r LANGFUSE_SECRET_KEY </dev/tty
     fi
 
     if [ -n "$LANGFUSE_USER_ID" ]; then
@@ -282,7 +282,7 @@ if [ -z "$LANGFUSE_SECRET_KEY" ] || [ -z "$LANGFUSE_PUBLIC_KEY" ] || [ -z "$LANG
     else
         prompt_input "Langfuse User ID [default: OS username]: "
     fi
-    read -r INPUT_USER_ID
+    read -r INPUT_USER_ID </dev/tty
     LANGFUSE_USER_ID="${INPUT_USER_ID:-$LANGFUSE_USER_ID}"
 
     if [ -n "$LANGFUSE_TAGS" ]; then
@@ -290,7 +290,7 @@ if [ -z "$LANGFUSE_SECRET_KEY" ] || [ -z "$LANGFUSE_PUBLIC_KEY" ] || [ -z "$LANG
     else
         prompt_input "Extra Tags (e.g. team:olap,env:prod) [none]: "
     fi
-    read -r INPUT_TAGS
+    read -r INPUT_TAGS </dev/tty
     LANGFUSE_TAGS="${INPUT_TAGS:-$LANGFUSE_TAGS}"
 
     echo ""
