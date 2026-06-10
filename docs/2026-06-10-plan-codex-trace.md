@@ -8,22 +8,21 @@
 |---|------|------|
 | 1 | `hooks/codex/hooks/langfuse_hook.py` | 主 hook 脚本 — rollout 解析 + 三层投递 |
 | 2 | `hooks/codex/hooks/langfuse-entrypoint.sh` | Shell 入口 — source env + uv run |
-| 3 | `hooks/codex/hooks/hooks.json` | Codex hook 注册 (Stop 事件) |
-| 4 | `hooks/codex/.codex-plugin/plugin.json` | Codex plugin 元数据 |
 
 ### Phase 2: 安装器
 
 | # | 文件 | 描述 |
 |---|------|------|
-| 5 | `hooks/codex/install.sh` | Codex 专用安装器 |
-| 6 | `install.sh` (修改) | 统一安装器加入 codex 检测和安装 |
-| 7 | `uninstall.sh` (修改) | 统一卸载器加入 codex 清理 |
+| 3 | `hooks/codex/install.sh` | Codex 专用安装器（复制 hook 文件 + langstash_deliver + 注册 hooks.json） |
+| 4 | `hooks/codex/uninstall.sh` | Codex 专用卸载器 |
+| 5 | `install.sh` (修改) | 统一安装器加入 codex 检测和安装 |
+| 6 | `uninstall.sh` (修改) | 统一卸载器加入 codex 清理 |
 
 ### Phase 3: 文档
 
 | # | 文件 | 描述 |
 |---|------|------|
-| 8 | `hooks/codex/README.md` | Codex hook 文档 |
+| 7 | `hooks/codex/README.md` | Codex hook 文档 |
 
 ## 关键实现细节
 
@@ -41,19 +40,19 @@ stdin JSON → session_id + transcript_path
 ### 2. 文件安装路径
 
 ```
-~/.codex/plugins/cache/agent-exporter-to-langfuse/langfuse/<version>/
-├── .codex-plugin/plugin.json
-├── hooks/
-│   ├── hooks.json
-│   ├── langfuse_hook.py
-│   └── langfuse-entrypoint.sh
-└── pyproject.toml (uv init 生成)
+~/.codex/
+├── hooks.json                   # Stop hook 注册（安装器写入）
+└── hooks/langfuse/
+    ├── langfuse_hook.py
+    ├── langfuse-entrypoint.sh
+    ├── langstash_deliver/       # 安装时从源码拷贝
+    └── pyproject.toml           # uv init 生成
 ```
 
 ### 3. hooks.json command 路径
 
 ```bash
-bash "${CODEX_HOME:-$HOME/.codex}/plugins/cache/agent-exporter-to-langfuse/langfuse/<version>/hooks/langfuse-entrypoint.sh"
+bash "~/.codex/hooks/langfuse/langfuse-entrypoint.sh"
 ```
 
 ### 4. Rollout 解析状态机
@@ -84,8 +83,15 @@ bash "${CODEX_HOME:-$HOME/.codex}/plugins/cache/agent-exporter-to-langfuse/langf
 3. agent 列表 case 中加入 `codex`
 4. `--agents` 帮助文本加入 codex
 
-### 7. uninstall.sh 修改点
+### 7. hooks/codex/install.sh 核心步骤
 
-1. 检查 `~/.codex/plugins/cache/agent-exporter-to-langfuse/` 是否存在
-2. 删除 plugin cache 目录
-3. 删除 env 文件
+1. 复制 hook 文件到 `~/.codex/hooks/langfuse/`
+2. 复制 `langstash_deliver/` 包到 hooks 目录（安装时拷贝，运行时直接引用）
+3. 初始化 uv 环境（`uv init && uv add langfuse`）
+4. 在 `~/.codex/hooks.json` 注册 Stop hook
+5. 写入 env 文件 + shell profile + LaunchAgent
+
+### 8. uninstall.sh 修改点
+
+1. 检测 `~/.codex/hooks/langfuse/` 或 hooks.json 中的 langfuse 条目
+2. 调用 `hooks/codex/uninstall.sh`（删除 hooks 目录、hooks.json 条目、env 文件、LaunchAgent）

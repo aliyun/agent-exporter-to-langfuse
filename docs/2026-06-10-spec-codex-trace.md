@@ -43,9 +43,10 @@ codex-observability-plugin（TypeScript）的核心机制：
 
 ### 3.4 Hook 注册方式
 
-使用 Codex 原生 plugin 机制：
-- `.codex-plugin/plugin.json` — plugin 元数据
-- `hooks/hooks.json` — 注册 `Stop` 事件 hook
+使用 Codex hooks.json 机制（与 qoder/qoderwork 的 settings.json 方式类似）：
+- 安装器将 hook 文件复制到 `~/.codex/hooks/langfuse/`
+- 在 `~/.codex/hooks.json` 中注册 `Stop` 事件 hook
+- 通过 wrapper script `langfuse-entrypoint.sh` 调用
 
 ## 4. 数据模型映射
 
@@ -105,16 +106,26 @@ metadata: {call_id, error (如有)}
 
 ## 5. 文件结构
 
+源码目录：
 ```
 hooks/codex/
-├── .codex-plugin/
-│   └── plugin.json              # Codex plugin 元数据
 ├── hooks/
-│   ├── hooks.json               # Hook 注册 (Stop 事件)
 │   ├── langfuse_hook.py         # 主 hook 脚本
-│   └── pyproject.toml           # uv 项目配置
+│   └── langfuse-entrypoint.sh   # Shell 入口 — source env + uv run
 ├── install.sh                   # Codex 专用安装器
+├── uninstall.sh                 # Codex 专用卸载器
 └── README.md
+```
+
+安装后目录：
+```
+~/.codex/
+├── hooks.json                   # Hook 注册 (Stop 事件，安装器写入)
+└── hooks/langfuse/
+    ├── langfuse_hook.py
+    ├── langfuse-entrypoint.sh
+    ├── langstash_deliver/       # 安装时从源码拷贝
+    └── pyproject.toml           # uv init 生成
 ```
 
 ## 6. 核心模块设计
@@ -199,8 +210,7 @@ class Turn:
 
 优先级（低 → 高）：
 1. 环境变量 `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_BASE_URL`
-2. 环境文件 `~/.agent-exporter-to-langfuse/config/codex.env`（由安装器写入）
-3. Codex plugin userConfig（如果 Codex 支持，通过 `CODEX_PLUGIN_OPTION_*` 环境变量传入）
+2. 环境文件 `~/.agent-exporter-to-langfuse/config/codex.env`（由安装器写入，entrypoint 启动时 source）
 
 ### 7.2 可选参数
 
@@ -222,18 +232,26 @@ class Turn:
 ### 8.2 `hooks/codex/install.sh`
 
 职责：
-1. 创建 `~/.codex/hooks/langfuse/` 目录
-2. 复制 `langfuse_hook.py` 到该目录
-3. 初始化 uv 环境（`uv init && uv pip install langstash-deliver langfuse`）
-4. 写入 `~/.agent-exporter-to-langfuse/config/codex.env`
-5. 注册 Codex plugin：
-   - 复制 `.codex-plugin/` 到 `~/.codex/plugins/cache/agent-exporter-to-langfuse/codex/<version>/`
-   - 复制 `hooks/hooks.json` 到对应位置
-6. 注入环境变量到 shell profile
+1. 检查前置依赖（codex CLI / uv）
+2. 收集 Langfuse 凭据
+3. 复制 `langfuse_hook.py` + `langfuse-entrypoint.sh` 到 `~/.codex/hooks/langfuse/`
+4. 复制 `langstash_deliver/` 包到 hooks 目录（安装时拷贝，运行时直接引用）
+5. 初始化 uv 环境（`uv init && uv add langfuse`）
+6. 在 `~/.codex/hooks.json` 中注册 Stop hook
+7. 写入 `~/.agent-exporter-to-langfuse/config/codex.env`
+8. 注入环境变量到 shell profile + LaunchAgent (macOS)
 
-### 8.3 `uninstall.sh` 修改
+### 8.3 `hooks/codex/uninstall.sh`
 
-- 新增 Codex hook 清理逻辑
+职责：
+1. 删除 `~/.codex/hooks/langfuse/` 目录
+2. 从 `~/.codex/hooks.json` 中移除 langfuse hook 条目
+3. 删除 env 文件
+4. 删除 LaunchAgent (macOS)
+
+### 8.4 `uninstall.sh` 修改
+
+- 新增 Codex hook 检测和清理分支
 
 ## 9. 子 Agent 支持
 

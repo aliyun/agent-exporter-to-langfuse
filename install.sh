@@ -48,7 +48,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --base-url URL      Langfuse Base URL (default: https://us.cloud.langfuse.com)"
             echo "  --user-id ID        Langfuse User ID (optional, defaults to OS username)"
             echo "  --tags TAGS         Extra tags (comma-separated, e.g. team:olap,env:prod). Agent name is always included."
-            echo "  --agents LIST       Comma-separated agents to install (claude-code,qoder,qoderwork,opencode,codex)"
+            echo "  --agents LIST       Comma-separated agents to install (claude-code,qoder,qoderwork,opencode,codex)."
+            echo "                      Reuses existing Langfuse credentials if available."
             echo "  --no-install-uv     Skip automatic uv installation"
             echo "  --upgrade           Upgrade mode: reuse existing config, skip interactive prompts"
             echo "  -y, --yes           Skip interactive agent selection, install all detected"
@@ -149,6 +150,21 @@ if [ ${#DETECTED_AGENTS[@]} -eq 0 ]; then
     exit 1
 fi
 
+# Split detected agents into already-installed and new
+is_exporter_installed() {
+    [ -f "$INSTALL_DIR/config/$1.env" ]
+}
+
+declare -a INSTALLED_AGENTS=()
+declare -a NEW_AGENTS=()
+for agent in "${DETECTED_AGENTS[@]}"; do
+    if is_exporter_installed "$agent"; then
+        INSTALLED_AGENTS+=("$agent")
+    else
+        NEW_AGENTS+=("$agent")
+    fi
+done
+
 # --- Agent selection ---
 declare -a SELECTED_AGENTS=()
 
@@ -165,7 +181,7 @@ if [ "$ARG_UPGRADE" = true ]; then
         SELECTED_AGENTS=("${DETECTED_AGENTS[@]}")
     fi
 elif [ -n "$ARG_AGENTS" ]; then
-    # Explicit --agents flag: use directly, no interaction
+    # Explicit --agents flag: use directly, no interaction (allows re-install)
     IFS=',' read -ra AGENT_LIST <<< "$ARG_AGENTS"
     for agent in "${AGENT_LIST[@]}"; do
         case "$agent" in
@@ -174,24 +190,43 @@ elif [ -n "$ARG_AGENTS" ]; then
         esac
     done
 elif [ "$ARG_YES" = true ]; then
-    # --yes: install all detected without asking
-    SELECTED_AGENTS=("${DETECTED_AGENTS[@]}")
+    # --yes: install all not-yet-installed agents without asking
+    if [ ${#NEW_AGENTS[@]} -gt 0 ]; then
+        SELECTED_AGENTS=("${NEW_AGENTS[@]}")
+    else
+        SELECTED_AGENTS=("${DETECTED_AGENTS[@]}")
+    fi
 else
-    # Interactive selection
+    # Interactive selection — show already-installed agents separately
+    if [ ${#INSTALLED_AGENTS[@]} -gt 0 ]; then
+        echo -e "${BOLD}Already installed:${NC}"
+        for agent in "${INSTALLED_AGENTS[@]}"; do
+            echo -e "  ${DIM}✓ $agent${NC}"
+        done
+        echo ""
+    fi
+
+    if [ ${#NEW_AGENTS[@]} -eq 0 ]; then
+        info "All detected agents already have exporter installed."
+        echo ""
+        echo -e "  ${DIM}To reinstall, use: install.sh --agents <agent-name>${NC}"
+        exit 0
+    fi
+
     echo -e "${BOLD}Detected coding agents:${NC}"
     echo ""
-    for i in "${!DETECTED_AGENTS[@]}"; do
-        local_agent="${DETECTED_AGENTS[$i]}"
+    for i in "${!NEW_AGENTS[@]}"; do
+        local_agent="${NEW_AGENTS[$i]}"
         num=$((i + 1))
         echo -e "  ${GREEN}[$num]${NC} $local_agent"
     done
     echo ""
     echo -e "  ${DIM}Enter numbers to install (comma-separated), or press Enter for all.${NC}"
-    prompt_input "Select agents [1-${#DETECTED_AGENTS[@]}, default: all]: "
+    prompt_input "Select agents [1-${#NEW_AGENTS[@]}, default: all]: "
     read -r SELECTION </dev/tty
 
     if [ -z "$SELECTION" ] || [ "$SELECTION" = "all" ]; then
-        SELECTED_AGENTS=("${DETECTED_AGENTS[@]}")
+        SELECTED_AGENTS=("${NEW_AGENTS[@]}")
     else
         IFS=',' read -ra SEL_NUMS <<< "$SELECTION"
         for num in "${SEL_NUMS[@]}"; do
@@ -201,8 +236,8 @@ else
                 continue
             fi
             idx=$((num - 1))
-            if [ "$idx" -ge 0 ] && [ "$idx" -lt "${#DETECTED_AGENTS[@]}" ]; then
-                SELECTED_AGENTS+=("${DETECTED_AGENTS[$idx]}")
+            if [ "$idx" -ge 0 ] && [ "$idx" -lt "${#NEW_AGENTS[@]}" ]; then
+                SELECTED_AGENTS+=("${NEW_AGENTS[$idx]}")
             else
                 warn "Invalid selection: $num (skipped)"
             fi
@@ -262,6 +297,30 @@ fi
 # ============================================================
 # Step 3: Collect 3 required Langfuse parameters
 # ============================================================
+# Try to reuse credentials from existing config (incremental install)
+if [ -z "$LANGFUSE_SECRET_KEY" ] || [ -z "$LANGFUSE_PUBLIC_KEY" ] || [ -z "$LANGFUSE_BASE_URL" ]; then
+    SAVED_TAGS="$LANGFUSE_TAGS"
+    CONFIG_DIR="$INSTALL_DIR/config"
+    for env_file in "$CONFIG_DIR"/*.env; do
+        [ -f "$env_file" ] || continue
+        . "$env_file"
+        if [ -n "${LANGFUSE_SECRET_KEY:-}" ] && [ -n "${LANGFUSE_PUBLIC_KEY:-}" ] && [ -n "${LANGFUSE_BASE_URL:-}" ]; then
+            info "Reusing Langfuse credentials from $(basename "$env_file")"
+            # Strip agent-name tags from sourced LANGFUSE_TAGS to recover user's extra tags
+            if [ -z "$SAVED_TAGS" ] && [ -n "${LANGFUSE_TAGS:-}" ]; then
+                STRIPPED_TAGS="$LANGFUSE_TAGS"
+                for _atag in claude-code qoder qoderwork opencode codex; do
+                    STRIPPED_TAGS=$(echo "$STRIPPED_TAGS" | sed "s/^${_atag},//;s/,${_atag}\$//;s/,${_atag},/,/;s/^${_atag}\$//")
+                done
+                LANGFUSE_TAGS="$STRIPPED_TAGS"
+            else
+                LANGFUSE_TAGS="$SAVED_TAGS"
+            fi
+            break
+        fi
+    done
+fi
+
 if [ -z "$LANGFUSE_SECRET_KEY" ] || [ -z "$LANGFUSE_PUBLIC_KEY" ] || [ -z "$LANGFUSE_BASE_URL" ]; then
     echo -e "${BOLD}=== Langfuse Configuration ===${NC}"
     echo "Enter your Langfuse credentials (from Langfuse project settings -> API Keys)."
@@ -385,13 +444,30 @@ done
 # ============================================================
 # Step 5: Install langstash service
 # ============================================================
+LANGSTASH_BIN="$INSTALL_DIR/exporter/.venv/bin/langstash"
+LANGSTASH_CONFIG="$INSTALL_DIR/config/config.toml"
+
+is_langstash_installed() {
+    [ -x "$LANGSTASH_BIN" ] && [ -f "$LANGSTASH_CONFIG" ] || return 1
+    if [ "$(uname)" = "Darwin" ]; then
+        launchctl list com.langstash &>/dev/null
+    else
+        systemctl --user is-enabled langstash &>/dev/null 2>&1
+    fi
+}
+
 echo ""
-echo -e "${BOLD}--- Installing: langstash ---${NC}"
-INSTALL_DIR="$INSTALL_DIR" \
-LANGFUSE_PUBLIC_KEY="$LANGFUSE_PUBLIC_KEY" \
-LANGFUSE_SECRET_KEY="$LANGFUSE_SECRET_KEY" \
-LANGFUSE_BASE_URL="$LANGFUSE_BASE_URL" \
-bash "$SCRIPT_DIR/exporter/install-langstash.sh" || warn "langstash installation skipped"
+if is_langstash_installed && [ "$ARG_UPGRADE" != true ]; then
+    echo -e "${BOLD}--- langstash ---${NC}"
+    info "langstash service already installed, skipping. Use --upgrade to reinstall."
+else
+    echo -e "${BOLD}--- Installing: langstash ---${NC}"
+    INSTALL_DIR="$INSTALL_DIR" \
+    LANGFUSE_PUBLIC_KEY="$LANGFUSE_PUBLIC_KEY" \
+    LANGFUSE_SECRET_KEY="$LANGFUSE_SECRET_KEY" \
+    LANGFUSE_BASE_URL="$LANGFUSE_BASE_URL" \
+    bash "$SCRIPT_DIR/exporter/install-langstash.sh" || warn "langstash installation skipped"
+fi
 
 # ============================================================
 # Step 6: Summary
