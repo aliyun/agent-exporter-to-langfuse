@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: bash uninstall.sh [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --agents LIST    Comma-separated agents to uninstall (claude-code,qoder,qoderwork,opencode)"
+            echo "  --agents LIST    Comma-separated agents to uninstall (claude-code,qoder,qoderwork,opencode,codex)"
             echo "  -y, --yes        Uninstall everything without prompting"
             echo "  -h, --help       Show this help"
             exit 0
@@ -90,6 +90,10 @@ if [ -f "$HOME/.config/opencode/plugins/langfuse-exporter.mjs" ] || [ -f "$HOME/
     INSTALLED_AGENTS+=("opencode")
 fi
 
+if [ -d "$HOME/.codex/plugins/cache/agent-exporter-to-langfuse" ] || grep -q "langfuse@agent-exporter-to-langfuse" "$HOME/.codex/config.toml" 2>/dev/null; then
+    INSTALLED_AGENTS+=("codex")
+fi
+
 # ============================================================
 # Step 2: Select hooks to uninstall
 # ============================================================
@@ -101,7 +105,7 @@ elif [ -n "$ARG_AGENTS" ]; then
     IFS=',' read -ra AGENT_LIST <<< "$ARG_AGENTS"
     for agent in "${AGENT_LIST[@]}"; do
         case "$agent" in
-            claude-code|qoder|qoderwork|opencode) SELECTED_AGENTS+=("$agent") ;;
+            claude-code|qoder|qoderwork|opencode|codex) SELECTED_AGENTS+=("$agent") ;;
             *) error "Unknown agent: $agent"; exit 1 ;;
         esac
     done
@@ -227,6 +231,10 @@ uninstall_opencode() {
     echo -e "${BOLD}--- Uninstalling: OpenCode ---${NC}"
     bash "$SCRIPT_DIR/hooks/opencode/uninstall.sh"
 }
+uninstall_codex() {
+    echo -e "${BOLD}--- Uninstalling: Codex ---${NC}"
+    bash "$SCRIPT_DIR/hooks/codex/uninstall.sh"
+}
 
 if [ ${#SELECTED_AGENTS[@]} -gt 0 ]; then
     for agent in "${SELECTED_AGENTS[@]}"; do
@@ -236,6 +244,7 @@ if [ ${#SELECTED_AGENTS[@]} -gt 0 ]; then
             qoder)       uninstall_qoder ;;
             qoderwork)   uninstall_qoderwork ;;
             opencode)    uninstall_opencode ;;
+            codex)       uninstall_codex ;;
         esac
     done
 fi

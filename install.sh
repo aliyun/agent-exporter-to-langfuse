@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --base-url URL      Langfuse Base URL (default: https://us.cloud.langfuse.com)"
             echo "  --user-id ID        Langfuse User ID (optional, defaults to OS username)"
             echo "  --tags TAGS         Extra tags (comma-separated, e.g. team:olap,env:prod). Agent name is always included."
-            echo "  --agents LIST       Comma-separated agents to install (claude-code,qoder,qoderwork,opencode)"
+            echo "  --agents LIST       Comma-separated agents to install (claude-code,qoder,qoderwork,opencode,codex)"
             echo "  --no-install-uv     Skip automatic uv installation"
             echo "  --upgrade           Upgrade mode: reuse existing config, skip interactive prompts"
             echo "  -y, --yes           Skip interactive agent selection, install all detected"
@@ -130,14 +130,21 @@ detect_opencode() {
     return 1
 }
 
+detect_codex() {
+    if [ -d "$HOME/.codex" ]; then return 0; fi
+    if command -v codex &>/dev/null; then return 0; fi
+    return 1
+}
+
 # Build detection list
 detect_claude_code && DETECTED_AGENTS+=("claude-code")
 detect_qoder && DETECTED_AGENTS+=("qoder")
 detect_qoderwork && DETECTED_AGENTS+=("qoderwork")
 detect_opencode && DETECTED_AGENTS+=("opencode")
+detect_codex && DETECTED_AGENTS+=("codex")
 
 if [ ${#DETECTED_AGENTS[@]} -eq 0 ]; then
-    error "No coding agents detected. Supported: Claude Code, Qoder, QoderWork, OpenCode."
+    error "No coding agents detected. Supported: Claude Code, Qoder, QoderWork, OpenCode, Codex."
     echo "  Install at least one agent, or use --agents to specify manually."
     exit 1
 fi
@@ -151,7 +158,7 @@ if [ "$ARG_UPGRADE" = true ]; then
         [ -f "$env_file" ] || continue
         agent_name=$(basename "$env_file" .env)
         case "$agent_name" in
-            claude-code|qoder|qoderwork|opencode) SELECTED_AGENTS+=("$agent_name") ;;
+            claude-code|qoder|qoderwork|opencode|codex) SELECTED_AGENTS+=("$agent_name") ;;
         esac
     done
     if [ ${#SELECTED_AGENTS[@]} -eq 0 ]; then
@@ -162,7 +169,7 @@ elif [ -n "$ARG_AGENTS" ]; then
     IFS=',' read -ra AGENT_LIST <<< "$ARG_AGENTS"
     for agent in "${AGENT_LIST[@]}"; do
         case "$agent" in
-            claude-code|qoder|qoderwork|opencode) SELECTED_AGENTS+=("$agent") ;;
+            claude-code|qoder|qoderwork|opencode|codex) SELECTED_AGENTS+=("$agent") ;;
             *) error "Unknown agent: $agent"; exit 1 ;;
         esac
     done
@@ -353,6 +360,17 @@ install_opencode() {
         ${LANGFUSE_TAGS:+--tags "$LANGFUSE_TAGS"}
 }
 
+install_codex() {
+    echo ""
+    echo -e "${BOLD}--- Installing: Codex ---${NC}"
+    bash "$SCRIPT_DIR/hooks/codex/install.sh" \
+        --secret-key "$LANGFUSE_SECRET_KEY" \
+        --public-key "$LANGFUSE_PUBLIC_KEY" \
+        --base-url "$LANGFUSE_BASE_URL" \
+        ${LANGFUSE_USER_ID:+--user-id "$LANGFUSE_USER_ID"} \
+        ${LANGFUSE_TAGS:+--tags "$LANGFUSE_TAGS"}
+}
+
 # --- Run installation ---
 for agent in "${SELECTED_AGENTS[@]}"; do
     case "$agent" in
@@ -360,6 +378,7 @@ for agent in "${SELECTED_AGENTS[@]}"; do
         qoder)       install_qoder ;;
         qoderwork)   install_qoderwork ;;
         opencode)    install_opencode ;;
+        codex)       install_codex ;;
     esac
 done
 

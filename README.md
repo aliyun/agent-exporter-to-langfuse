@@ -7,7 +7,7 @@ Export AI Agent session observability data (conversation turns, model calls, too
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                      AI Agents                          │
-│  Claude Code · Qoder · QoderWork · OpenCode · ...       │
+│  Claude Code · Qoder · QoderWork · OpenCode · Codex     │
 └────────┬────────────────────────────────────────────────┘
          │ Plugin Hook (per-agent)
          ▼
@@ -40,6 +40,7 @@ Export AI Agent session observability data (conversation turns, model calls, too
 | [Qoder](https://qoder.com) | [`hooks/qoder/`](./hooks/qoder/) | Collect Qoder (CLI / Desktop / QoderWake) session data via Plugin Hook |
 | [QoderWork](https://qoder.com/qoderwork) | [`hooks/qoderwork/`](./hooks/qoderwork/) | Collect QoderWork session data via Plugin Hook |
 | [OpenCode](https://opencode.ai) | [`hooks/opencode/`](./hooks/opencode/) | Collect OpenCode session data via Plugin Hook |
+| [Codex](https://developers.openai.com/codex) | [`hooks/codex/`](./hooks/codex/) | Collect OpenAI Codex CLI session data via Plugin Hook |
 
 See the README in each directory for detailed configuration and usage instructions.
 
