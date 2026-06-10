@@ -127,3 +127,12 @@ SVCEOF
     systemctl --user enable --now langstash 2>/dev/null || true
     info "systemd service installed: $SERVICE_FILE"
 fi
+
+# --- 4. Print key configuration ---
+echo ""
+info "langstash configuration:"
+echo "  Config:    $CONFIG_FILE"
+echo "  Server:    http://127.0.0.1:5288"
+echo "  Data:      $DATA_DIR"
+echo "  Logs:      $LOGS_DIR"
+echo "  Langfuse:  ${LANGFUSE_BASE_URL:-https://us.cloud.langfuse.com}"
