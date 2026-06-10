@@ -90,7 +90,7 @@ if [ -f "$HOME/.config/opencode/plugins/langfuse-exporter.mjs" ] || [ -f "$HOME/
     INSTALLED_AGENTS+=("opencode")
 fi
 
-if [ -d "$HOME/.codex/plugins/cache/agent-exporter-to-langfuse" ] || grep -q "langfuse@agent-exporter-to-langfuse" "$HOME/.codex/config.toml" 2>/dev/null; then
+if [ -d "$HOME/.codex/hooks/langfuse" ] || grep -q "langfuse-entrypoint.sh" "$HOME/.codex/hooks.json" 2>/dev/null; then
     INSTALLED_AGENTS+=("codex")
 fi
 
