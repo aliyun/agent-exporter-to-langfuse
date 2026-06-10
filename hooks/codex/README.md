@@ -108,21 +108,6 @@ After installation:
 └── .venv/                            # Python venv (created during install)
 ```
 
-## Debugging
-
-View logs:
-
-```bash
-tail -f ~/.codex/state/langfuse_hook.log
-```
-
-Enable verbose logging, add to `codex.env`:
-
-```bash
-LANGFUSE_DEBUG="true"
-LANGSTASH_LOG_LEVEL="DEBUG"
-```
-
 ## Limitations
 
 - **No SubagentStop**: Codex sub-agents have independent rollout files, handled by their own Stop hooks
@@ -132,4 +117,3 @@ LANGSTASH_LOG_LEVEL="DEBUG"
 
 - Technical spec: `docs/2026-06-10-spec-codex-trace.md`
 - Implementation plan: `docs/2026-06-10-plan-codex-trace.md`
-- Codex Observability Plugin: `/Users/song/code/codex-observability-plugin`

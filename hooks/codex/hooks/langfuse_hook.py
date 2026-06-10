@@ -161,6 +161,7 @@ def read_hook_payload() -> Dict[str, Any]:
         parsed = json.loads(data)
         if isinstance(parsed, dict):
             debug(f"payload top-level keys: {sorted(parsed.keys())}")
+            debug(f"PAYLOAD_DUMP: {json.dumps(parsed, ensure_ascii=False, default=str)}")
         return parsed
     except Exception as e:
         debug(f"read_hook_payload exception: {e!r}")
@@ -738,11 +739,16 @@ def main() -> int:
     secret_key = os.environ.get("LANGFUSE_SECRET_KEY", "")
     host = os.environ.get("LANGFUSE_BASE_URL") or "https://us.cloud.langfuse.com"
 
+    debug(f"Config: host={host}, public_key={public_key[:12] + '...' if public_key else '(empty)'}, _HAS_DELIVER={_HAS_DELIVER}")
+
     if not public_key or not secret_key:
+        debug("Missing LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY; exiting.")
         return 0
 
     payload = read_hook_payload()
     session_id, transcript_path = extract_session_and_transcript(payload)
+
+    debug(f"Extracted session_id={session_id}, transcript_path={transcript_path}")
 
     if not session_id or not transcript_path:
         debug("Missing session_id or transcript_path from hook payload; exiting.")
@@ -769,26 +775,33 @@ def main() -> int:
             ss = load_session_state(state, key)
 
             msgs, ss = read_new_jsonl(transcript_path, ss)
+            debug(f"Read {len(msgs)} new JSONL lines from transcript (offset now {ss.offset})")
             if not msgs:
+                debug("No new messages; saving state and exiting.")
                 write_session_state(state, key, ss)
                 save_state(state)
                 return 0
 
             session_meta, turns = parse_rollout(msgs)
+            debug(f"Parsed {len(turns)} turns from {len(msgs)} lines (session_meta.session_id={session_meta.session_id}, model_provider={session_meta.model_provider})")
             if not turns:
+                debug("No turns found; saving state and exiting.")
                 write_session_state(state, key, ss)
                 save_state(state)
                 return 0
 
             sidecar = load_sidecar(transcript_path)
+            debug(f"Sidecar has {len(sidecar)} already-uploaded turn IDs")
 
             emitted = 0
             for t in turns:
                 if t.completed and t.turn_id and t.turn_id in sidecar:
+                    debug(f"Skipping already-uploaded turn: {t.turn_id}")
                     continue
 
                 emitted += 1
                 turn_num = ss.turn_count + emitted
+                debug(f"Emitting turn {turn_num}: turn_id={t.turn_id}, model={t.model}, steps={len(t.steps)}, tool_calls={sum(len(s.tool_calls) for s in t.steps)}, completed={t.completed}")
 
                 if _HAS_DELIVER:
                     try:
@@ -796,11 +809,13 @@ def main() -> int:
                             session_meta, turn_num, t, transcript_path,
                             user_id=user_id, tags=tags,
                         )
+                        debug(f"Turn {turn_num}: built trace_v2 JSON OK")
                     except Exception as e:
-                        debug(f"build_trace_v2 failed: {e}")
+                        debug(f"build_trace_v2 failed for turn {turn_num}: {e}")
                         trace_json = None
 
                     def _direct_push(_tj, _t=t, _turn_num=turn_num):
+                        debug(f"Turn {_turn_num}: using direct push fallback")
                         emit_turn_direct(
                             langfuse, session_meta, _turn_num, _t, transcript_path,
                             user_id=user_id, tags=tags,
@@ -817,6 +832,7 @@ def main() -> int:
                             langfuse, session_meta, turn_num, t, transcript_path,
                             user_id=user_id, tags=tags,
                         )
+                        debug(f"Turn {turn_num}: emit_turn_direct OK")
                     except Exception as e:
                         info(f"emit_turn_direct failed: {type(e).__name__}: {e}")
 
@@ -828,7 +844,7 @@ def main() -> int:
             save_state(state)
 
         dur = time.time() - start
-        info(f"Processed {emitted} turns in {dur:.2f}s (session={session_id})")
+        info(f"Processed {emitted} turns in {dur:.2f}s (session={session_id}, transcript={transcript_path})")
         return 0
 
     except TimeoutError as e:
