@@ -1,7 +1,7 @@
 [project]
-name = "hooks"
+name = "qoder-langfuse-hook"
 version = "0.1.0"
-description = "Claude Code Langfuse exporter hook"
+description = "Qoder Langfuse exporter hook"
 requires-python = ">=3.11"
 dependencies = [
     "langfuse>=4.7.0",

@@ -892,9 +892,32 @@ def _build_trace_v2(ctx: HookContext, turn_num: int, turn: Turn,
     )
 
 # ----------------- Main -----------------
+def _log_network_info() -> None:
+    """Log network info to help diagnose langstash connectivity from inside a VM."""
+    import platform
+    import subprocess
+    uname = platform.system()
+    debug(f"uname={uname}")
+    if uname == "Linux":
+        try:
+            gw = subprocess.check_output(
+                ["ip", "route"], timeout=2, stderr=subprocess.DEVNULL
+            ).decode().strip()
+            for line in gw.splitlines():
+                if line.startswith("default"):
+                    debug(f"default gateway: {line}")
+                    break
+        except Exception:
+            pass
+    langstash_url = os.environ.get("LANGSTASH_URL", "")
+    langstash_enabled = os.environ.get("LANGSTASH_ENABLED", "")
+    debug(f"LANGSTASH_ENABLED={langstash_enabled}, LANGSTASH_URL={langstash_url}")
+
+
 def main() -> int:
     start = time.time()
     debug("Hook started")
+    _log_network_info()
 
     public_key = _opt("LANGFUSE_PUBLIC_KEY")
     secret_key = _opt("LANGFUSE_SECRET_KEY")

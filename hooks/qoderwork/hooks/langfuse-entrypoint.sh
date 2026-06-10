@@ -10,13 +10,15 @@ for _env in \
     [ -f "$_env" ] && . "$_env" && break
 done
 
-if ! .venv/bin/python -c "" 2>/dev/null; then
-    rm -rf .venv
-    python3 -m venv .venv
-    .venv/bin/pip install -q langfuse 2>/dev/null
+if [ "$(uname)" = "Darwin" ]; then
+    exec uv run python langfuse_hook.py
+else
+    # uv not available in VM, use pre-installed venv
+    VENV_DIR="$SCRIPT_DIR/.venv-linux"
+    if ! "$VENV_DIR/bin/python" -c "" 2>/dev/null; then
+        rm -rf "$VENV_DIR"
+        python3 -m venv "$VENV_DIR"
+        "$VENV_DIR/bin/pip" install -q langfuse 2>/dev/null
+    fi
+    exec "$VENV_DIR/bin/python" langfuse_hook.py
 fi
-
-DELIVER_PKG="$HOME/.agent-exporter-to-langfuse/hooks/langstash-deliver/python"
-[ -d "$DELIVER_PKG" ] && .venv/bin/pip install -q "$DELIVER_PKG" 2>/dev/null
-
-exec .venv/bin/python langfuse_hook.py

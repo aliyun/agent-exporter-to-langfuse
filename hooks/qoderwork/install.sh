@@ -127,6 +127,8 @@ fi
 echo ""
 
 # --- 3. Install hook script ---
+LANGSTASH_SRC="$SCRIPT_DIR/../langstash-deliver/python/langstash_deliver"
+
 if [ -f "$HOOK_DIR/langfuse_hook.py" ]; then
     warn "Hook script already exists at $HOOK_DIR/langfuse_hook.py"
     read -rp "Overwrite? [y/N] " answer
@@ -146,13 +148,20 @@ else
     info "Hook script installed to $HOOK_DIR/"
 fi
 
-# --- 4. Initialize uv environment ---
-if [ ! -f "$HOOK_DIR/pyproject.toml" ]; then
-    info "Initializing uv environment in $HOOK_DIR ..."
-    (cd "$HOOK_DIR" && uv init --name qoderwork-langfuse && uv add langfuse)
-    info "uv environment ready."
+# Copy langstash-deliver package locally (avoids runtime pip install)
+if [ -d "$LANGSTASH_SRC" ]; then
+    rm -rf "$HOOK_DIR/langstash_deliver"
+    cp -R "$LANGSTASH_SRC" "$HOOK_DIR/langstash_deliver"
+    info "langstash-deliver copied to $HOOK_DIR/"
 else
-    info "uv environment already exists, skipping init."
+    warn "langstash-deliver source not found at $LANGSTASH_SRC, skipping"
+fi
+
+# --- 4. Set up pyproject.toml for uv ---
+SOURCE_PYPROJECT="$SCRIPT_DIR/hooks/pyproject.toml"
+if [ -f "$SOURCE_PYPROJECT" ]; then
+    cp "$SOURCE_PYPROJECT" "$HOOK_DIR/pyproject.toml"
+    info "pyproject.toml installed to $HOOK_DIR/"
 fi
 
 # --- 5. Configure settings.json ---

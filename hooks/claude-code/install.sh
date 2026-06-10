@@ -125,6 +125,17 @@ else
     echo ""
 fi
 
+# --- 2.5. Copy langstash-deliver into hooks dir ---
+LANGSTASH_SRC="$SCRIPT_DIR/../langstash-deliver/python/langstash_deliver"
+LANGSTASH_DST="$PLUGIN_DIR/hooks/langstash_deliver"
+if [ -d "$LANGSTASH_SRC" ]; then
+    rm -rf "$LANGSTASH_DST"
+    cp -R "$LANGSTASH_SRC" "$LANGSTASH_DST"
+    info "langstash-deliver copied to hooks dir"
+else
+    warn "langstash-deliver source not found at $LANGSTASH_SRC, skipping"
+fi
+
 # --- 3. Detect marketplace name ---
 MARKETPLACE_NAME=""
 if claude plugin marketplace list 2>/dev/null | grep -q "$PLUGIN_DIR"; then

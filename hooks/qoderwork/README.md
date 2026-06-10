@@ -102,6 +102,10 @@ The `langfuse-entrypoint.sh` wrapper script handles these differences:
 
 ### Known limitations
 
+**Langstash unavailable with "Secure Work Environment" enabled**
+
+When the "Secure Workspace" (Linux VM) is enabled, hooks execute inside the VM while the langstash service runs on the macOS host at `127.0.0.1:5288`. The VM's `127.0.0.1` resolves to its own loopback, not the host, so langstash is unreachable. Traces will bypass langstash and be delivered directly to Langfuse via the SDK.
+
 **QoderWork Desktop: no subagent internals**
 
 Desktop fires `SubagentStop` hooks but the payload contains only `transcript_path` (the main agent's transcript), not `agent_transcript_path` (the subagent's own transcript). The hook cannot locate or process the subagent's internal data.
