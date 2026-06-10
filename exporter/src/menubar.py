@@ -71,6 +71,7 @@ class LangstashApp(rumps.App):
             self.menu.add(rumps.MenuItem("Server unreachable", callback=None))
             self.menu.add(rumps.separator)
             self.menu.add(rumps.MenuItem("Open Web UI", callback=self._open_webui))
+            self.menu.add(rumps.MenuItem("Restart Langstash", callback=self._restart))
             self.menu.add(rumps.separator)
             self.menu.add(rumps.MenuItem("Quit Langstash", callback=self._quit))
             return
@@ -137,6 +138,7 @@ class LangstashApp(rumps.App):
         pre_item = rumps.MenuItem("Pre-release Updates", callback=self._toggle_prerelease)
         pre_item.state = self._include_prerelease
         self.menu.add(pre_item)
+        self.menu.add(rumps.MenuItem("Restart Langstash", callback=self._restart))
         self.menu.add(rumps.separator)
         self.menu.add(rumps.MenuItem("Quit Langstash", callback=self._quit))
 
@@ -166,6 +168,18 @@ class LangstashApp(rumps.App):
     def _open_webui(self, _sender: Any = None) -> None:
         """Open the web UI in the default browser."""
         webbrowser.open(f"{self.server_url}/")
+
+    def _restart(self, _sender: Any = None) -> None:
+        try:
+            req = urllib.request.Request(
+                f"{self.server_url}/restart",
+                data=b"",
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            pass
+        rumps.quit_application()
 
     def _quit(self, _sender: Any = None) -> None:
         """Quit the application."""

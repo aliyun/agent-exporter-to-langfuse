@@ -1,4 +1,6 @@
 import logging
+import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -121,6 +123,15 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
             return JSONResponse({"status": "error", "message": "upgrade script not found"}, status_code=500)
         return JSONResponse({"status": "started", "upgrading_to": info.get("latest_version", "")})
 
+    @app.post("/restart")
+    async def post_restart() -> JSONResponse:
+        def _delayed_exit() -> None:
+            import time
+            time.sleep(0.5)
+            os._exit(0)
+        threading.Thread(target=_delayed_exit, daemon=True).start()
+        return JSONResponse({"status": "restarting"})
+
     @app.get("/favicon.svg")
     async def get_favicon() -> FileResponse:
         return FileResponse(ASSETS_DIR / "icon.svg", media_type="image/svg+xml")
@@ -147,6 +158,9 @@ body{font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;backgro
 .version{font-size:13px;color:#888}
 .update-badge{background:#2d6a2d;color:#8f8;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px;cursor:pointer}
 .update-badge:hover{background:#3a8a3a}
+.restart-btn{background:#444;color:#ccc;border:none;padding:3px 10px;border-radius:10px;font-size:11px;cursor:pointer;margin-left:8px}
+.restart-btn:hover{background:#555;color:#fff}
+.restart-btn.restarting{background:#6a5a2d;color:#ee8;cursor:wait}
 .update-badge.upgrading{background:#6a5a2d;color:#ee8;cursor:wait}
 .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
 .card{background:#262626;border-radius:8px;padding:16px;text-align:center}
@@ -172,7 +186,7 @@ body{font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;backgro
 <body>
 <div class="header">
   <h1>Langstash</h1>
-  <span class="version" id="ver"></span>
+  <span><span class="version" id="ver"></span><button class="restart-btn" id="restart-btn" onclick="doRestart()">Restart</button></span>
 </div>
 <div class="cards">
   <div class="card" id="c-traces"><div class="icon">&#9670;</div><div class="value" id="v-traces">-</div><div class="label">total traces</div></div>
@@ -255,6 +269,18 @@ function waitRestart(targetVer){
       clearInterval(iv);location.reload();
     }catch(e){$('ver').innerHTML='<span class="update-badge upgrading">Restarting...</span>'}
   },2000);
+}
+async function doRestart(){
+  const btn=$('restart-btn');
+  if(btn.classList.contains('restarting'))return;
+  btn.classList.add('restarting');btn.textContent='Restarting...';
+  try{await fetch('/restart',{method:'POST'})}catch(e){}
+  setTimeout(()=>{
+    const iv=setInterval(async()=>{
+      try{const r=await fetch('/health');if(r.ok){clearInterval(iv);location.reload()}}catch(e){}
+    },1000);
+    setTimeout(()=>{clearInterval(iv);btn.classList.remove('restarting');btn.textContent='Restart'},30000);
+  },1000);
 }
 poll();setInterval(poll,10000);
 </script>
