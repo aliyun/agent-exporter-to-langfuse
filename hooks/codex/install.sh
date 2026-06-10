@@ -171,7 +171,7 @@ else
 fi
 
 # --- 6. Register Stop hook in ~/.codex/hooks.json ---
-HOOK_COMMAND="bash \"~/.codex/hooks/langfuse/langfuse-entrypoint.sh\""
+HOOK_COMMAND="bash \"\$HOME/.codex/hooks/langfuse/langfuse-entrypoint.sh\""
 
 python3 -c "
 import json, sys, os
