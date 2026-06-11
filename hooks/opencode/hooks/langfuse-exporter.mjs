@@ -1,6 +1,5 @@
 import { Langfuse } from 'langfuse';
-import { appendFile, mkdir } from 'node:fs/promises';
-import { readFileSync, mkdirSync, appendFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, appendFileSync, statSync, renameSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, userInfo } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -71,23 +70,38 @@ const DEBUG = env('LANGFUSE_DEBUG').toLowerCase() !== 'false';
 const TAGS = (env('LANGFUSE_TAGS') || 'opencode').split(',').map(t => t.trim()).filter(Boolean);
 
 const LOG_DIR = join(homedir(), '.config', 'opencode', 'logs', 'langfuse-exporter');
+const LOG_FILE = join(LOG_DIR, 'langfuse_hook.log');
+const LOG_MAX_BYTES = 200_000_000;
+const LOG_BACKUP_COUNT = 3;
 let logDirReady = false;
+let logRotationChecked = false;
 
 const pad = (n) => String(n).padStart(2, '0');
 const logTimestamp = () => {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
-const logDateKey = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+const rotateIfNeeded = () => {
+  if (logRotationChecked) return;
+  logRotationChecked = true;
+  try {
+    const stat = statSync(LOG_FILE);
+    if (stat.size < LOG_MAX_BYTES) return;
+    for (let i = LOG_BACKUP_COUNT - 1; i >= 1; i--) {
+      try { renameSync(`${LOG_FILE}.${i}`, `${LOG_FILE}.${i + 1}`); } catch {}
+    }
+    try { renameSync(LOG_FILE, `${LOG_FILE}.1`); } catch {}
+    try { unlinkSync(`${LOG_FILE}.${LOG_BACKUP_COUNT + 1}`); } catch {}
+  } catch {}
 };
 
-const writeLogFile = async (level, msg) => {
+const writeLogFile = (level, msg) => {
   try {
-    if (!logDirReady) { await mkdir(LOG_DIR, { recursive: true }); logDirReady = true; }
-    const line = `[${logTimestamp()}] [${level}] ${msg}\n`;
-    await appendFile(join(LOG_DIR, `${logDateKey()}.log`), line, 'utf8');
+    if (!logDirReady) { mkdirSync(LOG_DIR, { recursive: true }); logDirReady = true; }
+    rotateIfNeeded();
+    const line = `${logTimestamp()} [${level}] ${msg}\n`;
+    appendFileSync(LOG_FILE, line, 'utf8');
   } catch {}
 };
 

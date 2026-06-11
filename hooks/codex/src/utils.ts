@@ -1,6 +1,69 @@
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+
+const LOG_DIR = join(homedir(), ".codex", "state");
+const LOG_FILE = join(LOG_DIR, "langfuse_hook.log");
+const LOG_MAX_BYTES = 200_000_000;
+const LOG_BACKUP_COUNT = 3;
+let logDirReady = false;
+let logRotationChecked = false;
+
+function rotateIfNeeded(): void {
+  if (logRotationChecked) return;
+  logRotationChecked = true;
+  try {
+    const stat = statSync(LOG_FILE);
+    if (stat.size < LOG_MAX_BYTES) return;
+    for (let i = LOG_BACKUP_COUNT - 1; i >= 1; i--) {
+      try { renameSync(`${LOG_FILE}.${i}`, `${LOG_FILE}.${i + 1}`); } catch {}
+    }
+    try { renameSync(LOG_FILE, `${LOG_FILE}.1`); } catch {}
+    try { unlinkSync(`${LOG_FILE}.${LOG_BACKUP_COUNT + 1}`); } catch {}
+  } catch {}
+}
+
+function logTimestamp(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function writeLog(level: string, args: unknown[]): void {
+  try {
+    if (!logDirReady) {
+      mkdirSync(LOG_DIR, { recursive: true });
+      logDirReady = true;
+    }
+    rotateIfNeeded();
+    const msg = args
+      .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
+      .join(" ");
+    appendFileSync(LOG_FILE, `${logTimestamp()} [${level}] ${msg}\n`);
+  } catch {}
+}
+
+let debugEnabled = false;
+export function setDebug(enabled: boolean): void {
+  debugEnabled = enabled;
+}
+
+export function debugLog(...args: unknown[]): void {
+  if (!debugEnabled) return;
+  writeLog("DEBUG", args);
+}
+
+export function info(...args: unknown[]): void {
+  writeLog("INFO", args);
+}
+
+export function warn(...args: unknown[]): void {
+  writeLog("WARN", args);
+}
+
+export function error(...args: unknown[]): void {
+  writeLog("ERROR", args);
+}
 
 export function readStdin<T>(): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -52,16 +115,6 @@ export function truncate(
     text: value.slice(0, maxChars),
     meta: { truncated: true, originalLength: value.length },
   };
-}
-
-let debugEnabled = false;
-export function setDebug(enabled: boolean): void {
-  debugEnabled = enabled;
-}
-export function debugLog(...args: unknown[]): void {
-  if (!debugEnabled) return;
-  // eslint-disable-next-line no-console
-  console.error("[langfuse-codex]", ...args);
 }
 
 /**

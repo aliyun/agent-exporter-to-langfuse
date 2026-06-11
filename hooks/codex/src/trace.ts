@@ -9,7 +9,7 @@ import { appendFailedTrace, buildTraceV2, postLangstash } from "./langstash.js";
 import { parseSession } from "./parse.js";
 import { loadUploadedTurnIds, markTurnUploaded } from "./sidecar.js";
 import type { ModelStep, RolloutLine, SessionMeta, TokenUsage, ToolCall, Turn } from "./types.js";
-import { debugLog, toText, truncate } from "./utils.js";
+import { debugLog, error, info, warn, toText, truncate } from "./utils.js";
 
 async function loadSession(file: string): Promise<RolloutLine[]> {
   const data = await fs.readFile(file, "utf-8");
@@ -180,7 +180,7 @@ async function emitTurnOtel(
   for (const threadId of turn.subagentThreadIds) {
     const subFile = await findSubagentRollout(ctx.rolloutFile, threadId);
     if (!subFile) {
-      debugLog(`subagent rollout not found for thread ${threadId}`);
+      warn(`subagent rollout not found for thread ${threadId}`);
       continue;
     }
     await convertRollout(subFile, { config: ctx.config, parentObservation: root });
@@ -218,7 +218,7 @@ export async function convertRollout(
   options: { config: Config; parentObservation?: LangfuseObservation },
 ): Promise<void> {
   const { sessionMeta, turns } = parseSession(await loadSession(rolloutFile));
-  debugLog(`parsed ${turns.length} turn(s) from ${path.basename(rolloutFile)}`);
+  info(`parsed ${turns.length} turn(s) from ${path.basename(rolloutFile)}`);
 
   if (options.parentObservation) {
     for (let i = 0; i < turns.length; i++) {
@@ -249,12 +249,12 @@ export async function convertRollout(
         const traceJson = buildTraceV2(turn, sessionMeta, options.config, traceName);
         delivered = await postLangstash(traceJson, options.config);
         if (delivered) {
-          debugLog(`delivered turn ${turn.turnId ?? "?"} via langstash`);
+          info(`delivered turn ${turn.turnId ?? "?"} via langstash`);
         } else {
-          debugLog("langstash delivery failed, falling back to OTel");
+          warn("langstash delivery failed, falling back to OTel");
         }
       } catch (e) {
-        debugLog("langstash build/post error:", e);
+        error("langstash build/post error:", e);
       }
     }
 
@@ -278,7 +278,7 @@ export async function convertRollout(
         );
         delivered = true;
       } catch (e) {
-        debugLog("OTel direct push failed:", e);
+        error("OTel direct push failed:", e);
       }
     }
 
@@ -287,9 +287,9 @@ export async function convertRollout(
       try {
         const traceJson = buildTraceV2(turn, sessionMeta, options.config, traceName);
         appendFailedTrace(traceJson);
-        debugLog("trace saved to failed log");
+        warn("trace saved to failed log");
       } catch (e) {
-        debugLog("failed log write error:", e);
+        error("failed log write error:", e);
       }
     }
 

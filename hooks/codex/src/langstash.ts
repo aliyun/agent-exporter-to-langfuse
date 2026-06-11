@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Config } from "./config.js";
 import type { ModelStep, SessionMeta, TokenUsage, Turn } from "./types.js";
-import { debugLog, toText, truncate } from "./utils.js";
+import { error, warn, toText, truncate } from "./utils.js";
 
 const FAILED_DIR = join(homedir(), ".agent-exporter-to-langfuse", "data", "failed");
 
@@ -163,7 +163,7 @@ export async function postLangstash(
     });
     return resp.ok;
   } catch (e) {
-    debugLog("langstash POST failed:", e);
+    warn("langstash POST failed:", e);
     return false;
   } finally {
     clearTimeout(timeout);
@@ -177,6 +177,6 @@ export function appendFailedTrace(traceJson: Record<string, unknown>): void {
     const line = JSON.stringify(traceJson) + "\n";
     appendFileSync(join(FAILED_DIR, `${today}.jsonl`), line, { flag: "a" });
   } catch (e) {
-    debugLog("appendFailedTrace error:", e);
+    error("appendFailedTrace error:", e);
   }
 }
