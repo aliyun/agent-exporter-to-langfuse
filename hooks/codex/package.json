@@ -1,0 +1,26 @@
+{
+  "name": "@agent-exporter-to-langfuse/codex-hook",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trace OpenAI Codex sessions to Langfuse with langstash delivery",
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "lint:tsc": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@langfuse/otel": "^5.4.1",
+    "@langfuse/tracing": "^5.4.1",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-node": "^2.0.1",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsdown": "^0.18.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
