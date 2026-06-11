@@ -52,6 +52,7 @@ export function buildTraceV2(
   turn: Turn,
   sessionMeta: SessionMeta,
   config: Config,
+  traceName: string,
 ): Record<string, unknown> {
   const maxChars = config.max_chars;
 
@@ -118,7 +119,7 @@ export function buildTraceV2(
     ...(config.user_id ? { user_id: config.user_id } : {}),
     ...(config.tags?.length ? { tags: config.tags } : {}),
     trace: {
-      name: "Codex Turn",
+      name: traceName,
       start_time: new Date(turn.startTime).toISOString(),
       end_time: new Date(turn.endTime).toISOString(),
       input:

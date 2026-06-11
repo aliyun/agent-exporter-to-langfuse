@@ -106,13 +106,14 @@ async function emitTurnOtel(
   ctx: {
     config: Config;
     rolloutFile: string;
+    traceName: string;
     parentObservation?: LangfuseObservation;
   },
 ): Promise<void> {
   const clip = makeClip(ctx.config.max_chars);
 
   const root = startObservation(
-    "Codex Turn",
+    ctx.traceName,
     {
       input: turn.userInput != null ? clip(turn.userInput) : undefined,
       output: turn.finalOutput != null ? clip(turn.finalOutput) : undefined,
@@ -220,10 +221,11 @@ export async function convertRollout(
   debugLog(`parsed ${turns.length} turn(s) from ${path.basename(rolloutFile)}`);
 
   if (options.parentObservation) {
-    for (const turn of turns) {
-      await emitTurnOtel(turn, sessionMeta, {
+    for (let i = 0; i < turns.length; i++) {
+      await emitTurnOtel(turns[i], sessionMeta, {
         config: options.config,
         rolloutFile,
+        traceName: `Codex - Subagent Turn ${i + 1}`,
         parentObservation: options.parentObservation,
       });
     }
@@ -232,17 +234,19 @@ export async function convertRollout(
 
   const uploaded = await loadUploadedTurnIds(rolloutFile);
 
-  for (const turn of turns) {
+  for (let i = 0; i < turns.length; i++) {
+    const turn = turns[i];
     if (turn.completed && turn.turnId && uploaded.has(turn.turnId)) {
       continue;
     }
 
+    const traceName = `Codex - Turn ${i + 1}`;
     let delivered = false;
 
     // Tier 1: langstash
     if (options.config.langstash_enabled) {
       try {
-        const traceJson = buildTraceV2(turn, sessionMeta, options.config);
+        const traceJson = buildTraceV2(turn, sessionMeta, options.config, traceName);
         delivered = await postLangstash(traceJson, options.config);
         if (delivered) {
           debugLog(`delivered turn ${turn.turnId ?? "?"} via langstash`);
@@ -260,7 +264,7 @@ export async function convertRollout(
         await propagateAttributes(
           {
             sessionId: sessionMeta.sessionId,
-            traceName: "Codex Turn",
+            traceName,
             ...(options.config.user_id ? { userId: options.config.user_id } : {}),
             ...(options.config.tags ? { tags: options.config.tags } : {}),
           },
@@ -268,6 +272,7 @@ export async function convertRollout(
             await emitTurnOtel(turn, sessionMeta, {
               config: options.config,
               rolloutFile,
+              traceName,
             });
           },
         );
@@ -280,7 +285,7 @@ export async function convertRollout(
     // Tier 3: failed log
     if (!delivered) {
       try {
-        const traceJson = buildTraceV2(turn, sessionMeta, options.config);
+        const traceJson = buildTraceV2(turn, sessionMeta, options.config, traceName);
         appendFailedTrace(traceJson);
         debugLog("trace saved to failed log");
       } catch (e) {
