@@ -71,7 +71,9 @@ LANGFUSE_PUBLIC_KEY="pk-xxx"
 LANGFUSE_SECRET_KEY="sk-xxx"
 LANGFUSE_BASE_URL="https://app.langfuse.com"
 LANGFUSE_USER_ID="your-user-id"      # optional
-LANGFUSE_TAGS="codex,project-name"   # optional
+LANGFUSE_TAGS="codex,project-name"   # optional, default: codex
+LANGFUSE_MAX_CHARS="800000"          # optional, max characters per content field (~200K tokens)
+LANGFUSE_DEBUG="true"                # optional, verbose logging. Set "false" to disable
 LANGSTASH_ENABLED="true"             # enable langstash delivery
 LANGSTASH_URL="http://127.0.0.1:5288"
 ```
@@ -123,6 +125,10 @@ hooks/codex/
 ├── uninstall.sh
 └── README.md
 ```
+
+## Limitations
+
+- Subagent and main agent session IDs cannot be correlated. Codex rollout files do not contain a mapping between subagent threads and the parent session, so they appear as independent sessions in Langfuse. Only in OTel direct-push mode are subagent traces nested as child spans under the parent turn.
 
 ## References
 
