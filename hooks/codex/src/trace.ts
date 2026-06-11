@@ -236,7 +236,10 @@ export async function convertRollout(
 
   for (let i = 0; i < turns.length; i++) {
     const turn = turns[i];
-    if (turn.completed && turn.turnId && uploaded.has(turn.turnId)) {
+    const effectiveId = turn.turnId ?? `idx-${i}`;
+
+    if (uploaded.has(effectiveId)) {
+      debugLog(`skipping already-uploaded turn ${effectiveId}`);
       continue;
     }
 
@@ -249,7 +252,7 @@ export async function convertRollout(
         const traceJson = buildTraceV2(turn, sessionMeta, options.config, traceName);
         delivered = await postLangstash(traceJson, options.config);
         if (delivered) {
-          info(`delivered turn ${turn.turnId ?? "?"} via langstash`);
+          info(`delivered turn ${effectiveId} via langstash`);
         } else {
           warn("langstash delivery failed, falling back to OTel");
         }
@@ -293,13 +296,7 @@ export async function convertRollout(
       }
     }
 
-    if (turn.completed && turn.turnId) {
-      uploaded.add(turn.turnId);
-      await markTurnUploaded(rolloutFile, turn.turnId);
-    } else if (turn.turnId) {
-      debugLog(
-        `uploaded in-progress turn ${turn.turnId}; waiting for completion before sidecar mark`,
-      );
-    }
+    uploaded.add(effectiveId);
+    await markTurnUploaded(rolloutFile, effectiveId);
   }
 }

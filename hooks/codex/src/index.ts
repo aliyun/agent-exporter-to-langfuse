@@ -8,11 +8,13 @@ let failOnError = process.env.LANGFUSE_CODEX_FAIL_ON_ERROR === "true";
 
 export async function runHook(): Promise<void> {
   loadEnvFile();
+  info("codex langfuse hook started");
 
   let hookInput: HookInput;
   try {
     hookInput = await readStdin<HookInput>();
   } catch (e) {
+    error("failed to read hook stdin:", e);
     return;
   }
 

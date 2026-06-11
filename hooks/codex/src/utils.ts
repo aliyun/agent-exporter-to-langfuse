@@ -30,17 +30,25 @@ function logTimestamp(): string {
 }
 
 function writeLog(level: string, args: unknown[]): void {
+  const msg = args
+    .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
+    .join(" ");
+  const line = `${logTimestamp()} [${level}] ${msg}\n`;
   try {
     if (!logDirReady) {
       mkdirSync(LOG_DIR, { recursive: true });
       logDirReady = true;
     }
     rotateIfNeeded();
-    const msg = args
-      .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
-      .join(" ");
-    appendFileSync(LOG_FILE, `${logTimestamp()} [${level}] ${msg}\n`);
-  } catch {}
+    appendFileSync(LOG_FILE, line);
+  } catch (e) {
+    try {
+      process.stderr.write(`[codex-langfuse] ${line}`);
+      if (!logDirReady) {
+        process.stderr.write(`[codex-langfuse] log dir creation failed: ${LOG_DIR} — ${e}\n`);
+      }
+    } catch {}
+  }
 }
 
 let debugEnabled = false;
