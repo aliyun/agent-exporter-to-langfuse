@@ -13,16 +13,20 @@ CODEX_HOOKS_JSON="$CODEX_HOME/hooks.json"
 LANGFUSE_PROFILE_DIR="$HOME/.agent-exporter-to-langfuse/config"
 LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/codex.env"
 
+# Shell profile
+if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
+    SHELL_RC="$HOME/.zshenv"
+else
+    SHELL_RC="$HOME/.profile"
+fi
+
 # --- Colors ---
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
 NC='\033[0m'
 
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 # --- Parse arguments ---
 while [[ $# -gt 0 ]]; do
@@ -60,7 +64,7 @@ original_count = len(hooks_data['hooks']['Stop'])
 hooks_data['hooks']['Stop'] = [
     matcher for matcher in hooks_data['hooks']['Stop']
     if not any(
-        hook.get('type') == 'command' and 'langfuse-entrypoint.sh' in hook.get('command', '')
+        hook.get('type') == 'command' and 'langfuse' in hook.get('command', '')
         for hook in matcher.get('hooks', [])
     )
 ]
@@ -94,13 +98,55 @@ else
     info "Env file not found: $LANGFUSE_ENV_FILE (skipping)"
 fi
 
-# --- 4. Remove LaunchAgent (macOS only) ---
+# --- 4. Clean up profile.d directory if empty ---
+if [ -d "$LANGFUSE_PROFILE_DIR" ] && [ -z "$(ls -A "$LANGFUSE_PROFILE_DIR" 2>/dev/null)" ]; then
+    rmdir "$LANGFUSE_PROFILE_DIR"
+    info "Removed empty profile directory: $LANGFUSE_PROFILE_DIR"
+
+    # Remove loader line from shell profile only when no agents remain
+    if [ -f "$SHELL_RC" ] && grep -qF "agent-exporter-to-langfuse" "$SHELL_RC" 2>/dev/null; then
+        python3 -c "
+import sys
+lines = open(sys.argv[1]).readlines()
+out = []
+skip_next = False
+for line in lines:
+    if '# Agent Langfuse Exporters' in line:
+        skip_next = True
+        if out and out[-1].strip() == '':
+            out.pop()
+        continue
+    if skip_next and 'agent-exporter-to-langfuse' in line:
+        skip_next = False
+        continue
+    skip_next = False
+    out.append(line)
+open(sys.argv[1], 'w').writelines(out)
+" "$SHELL_RC"
+        info "Removed loader line from $SHELL_RC"
+    fi
+fi
+
+# --- 5. Remove LaunchAgent (macOS only) ---
 LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/com.codex.langfuse-env.plist"
 
 if [ "$(uname)" = "Darwin" ] && [ -f "$LAUNCH_AGENT_PLIST" ]; then
     launchctl unload "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
     rm -f "$LAUNCH_AGENT_PLIST"
     info "Removed LaunchAgent: $LAUNCH_AGENT_PLIST"
+fi
+
+# --- 6. Remove state files ---
+STATE_DIR="$CODEX_HOME/state"
+removed_state=false
+for f in "$STATE_DIR/langfuse_hook.log"* "$STATE_DIR/langfuse_state.json" "$STATE_DIR/langfuse_state.lock"; do
+    if [ -f "$f" ]; then
+        rm -f "$f"
+        removed_state=true
+    fi
+done
+if [ "$removed_state" = true ]; then
+    info "Removed Langfuse state/log files from $STATE_DIR"
 fi
 
 echo ""

@@ -11,6 +11,11 @@ __pycache__/
 .python-version
 uv.lock
 
+# Node.js
+node_modules/
+pnpm-lock.yaml
+dist/
+
 # Claude Code local config
 .claude/
 

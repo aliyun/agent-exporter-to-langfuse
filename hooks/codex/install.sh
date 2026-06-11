@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Codex Langfuse Hook Installer
-# Installs hook files to ~/.codex/hooks/langfuse/ and registers Stop hook in ~/.codex/hooks.json
+# Builds and installs JS hook to ~/.codex/hooks/langfuse/ and registers Stop hook in ~/.codex/hooks.json
 
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 HOOKS_DIR="$CODEX_HOME/hooks"
@@ -59,9 +59,26 @@ if ! command -v codex &>/dev/null && [ ! -d "$CODEX_HOME" ]; then
     exit 1
 fi
 
-if ! command -v uv &>/dev/null; then
-    error "uv is not installed. Install it first: https://docs.astral.sh/uv/"
+if ! command -v node &>/dev/null; then
+    error "Node.js is not installed. Install Node.js >= 22: https://nodejs.org/"
     exit 1
+fi
+
+if ! command -v pnpm &>/dev/null; then
+    info "pnpm not found, installing via corepack ..."
+    if command -v corepack &>/dev/null; then
+        corepack enable pnpm 2>/dev/null || true
+        corepack prepare pnpm@latest --activate 2>/dev/null || true
+    fi
+    if ! command -v pnpm &>/dev/null; then
+        info "corepack unavailable, installing pnpm via npm ..."
+        npm install -g pnpm 2>&1 | tail -1
+    fi
+    if ! command -v pnpm &>/dev/null; then
+        error "Failed to install pnpm. Install it manually: https://pnpm.io/installation"
+        exit 1
+    fi
+    info "pnpm installed: $(pnpm --version)"
 fi
 
 # --- 2. Collect Langfuse credentials ---
@@ -130,48 +147,25 @@ else
     echo ""
 fi
 
-# --- 3. Copy hook files ---
+# --- 3. Build and install hook ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-mkdir -p "$LANGFUSE_HOOK_DIR"
 
-cp "$SCRIPT_DIR/hooks/langfuse_hook.py" "$LANGFUSE_HOOK_DIR/"
-cp "$SCRIPT_DIR/hooks/langfuse-entrypoint.sh" "$LANGFUSE_HOOK_DIR/"
-chmod +x "$LANGFUSE_HOOK_DIR/langfuse-entrypoint.sh"
+info "Installing dependencies and building hook ..."
+(cd "$SCRIPT_DIR" && pnpm install --frozen-lockfile 2>&1 || pnpm install 2>&1) | tail -3
+(cd "$SCRIPT_DIR" && pnpm run build 2>&1) | tail -3
 
-info "Hook files copied to $LANGFUSE_HOOK_DIR"
-
-# --- 4. Copy langstash-deliver library ---
-DELIVER_SRC="$SCRIPT_DIR/../../hooks/langstash-deliver/python/langstash_deliver"
-DELIVER_DST="$LANGFUSE_HOOK_DIR/langstash_deliver"
-
-if [ -d "$DELIVER_SRC" ]; then
-    rm -rf "$DELIVER_DST"
-    cp -r "$DELIVER_SRC" "$DELIVER_DST"
-    info "Copied langstash_deliver to $LANGFUSE_HOOK_DIR/"
-else
-    # Fallback: find from install dir
-    INSTALL_DIR="$HOME/.agent-exporter-to-langfuse"
-    DELIVER_SRC2="$INSTALL_DIR/hooks/langstash-deliver/python/langstash_deliver"
-    if [ -d "$DELIVER_SRC2" ]; then
-        rm -rf "$DELIVER_DST"
-        cp -r "$DELIVER_SRC2" "$DELIVER_DST"
-        info "Copied langstash_deliver from $INSTALL_DIR to $LANGFUSE_HOOK_DIR/"
-    else
-        warn "langstash_deliver source not found. Direct push will not be available."
-    fi
+if [ ! -f "$SCRIPT_DIR/dist/index.mjs" ]; then
+    error "Build failed: dist/index.mjs not found"
+    exit 1
 fi
 
-# --- 5. Initialize uv environment ---
-if [ ! -f "$LANGFUSE_HOOK_DIR/pyproject.toml" ]; then
-    info "Initializing uv environment in $LANGFUSE_HOOK_DIR ..."
-    (cd "$LANGFUSE_HOOK_DIR" && uv init --name codex-langfuse-hook && uv add langfuse)
-    info "uv environment ready."
-else
-    info "uv environment already exists, skipping init."
-fi
+mkdir -p "$LANGFUSE_HOOK_DIR/dist"
+cp "$SCRIPT_DIR/dist/index.mjs" "$LANGFUSE_HOOK_DIR/dist/"
 
-# --- 6. Register Stop hook in ~/.codex/hooks.json ---
-HOOK_COMMAND="bash \"\$HOME/.codex/hooks/langfuse/langfuse-entrypoint.sh\""
+info "Hook built and copied to $LANGFUSE_HOOK_DIR"
+
+# --- 4. Register Stop hook in ~/.codex/hooks.json ---
+HOOK_COMMAND="node \"\$HOME/.codex/hooks/langfuse/dist/index.mjs\""
 
 python3 -c "
 import json, sys, os
@@ -195,12 +189,11 @@ if 'Stop' not in hooks_data['hooks']:
     hooks_data['hooks']['Stop'] = []
 
 # Check if langfuse hook already exists
-langfuse_entrypoint = os.path.dirname(hook_command.split('\"')[1])
 hook_exists = False
 for matcher in hooks_data['hooks']['Stop']:
     if 'hooks' in matcher:
         for hook in matcher['hooks']:
-            if hook.get('type') == 'command' and langfuse_entrypoint in hook.get('command', ''):
+            if hook.get('type') == 'command' and 'langfuse' in hook.get('command', ''):
                 hook_exists = True
                 break
 
@@ -211,7 +204,8 @@ if not hook_exists:
             {
                 'type': 'command',
                 'command': hook_command,
-                'timeout_ms': 30000
+                'timeout': 30,
+                'statusMessage': 'Uploading Codex trace to Langfuse'
             }
         ]
     }
@@ -232,7 +226,7 @@ else:
     esac
 done
 
-# --- 7. Write env file ---
+# --- 5. Write env file ---
 case ",$LANGFUSE_TAGS," in
     *,codex,*) FINAL_TAGS="$LANGFUSE_TAGS" ;;
     *) FINAL_TAGS="codex${LANGFUSE_TAGS:+,$LANGFUSE_TAGS}" ;;
@@ -250,7 +244,7 @@ mkdir -p "$LANGFUSE_PROFILE_DIR"
 } > "$LANGFUSE_ENV_FILE"
 info "Env vars written to $LANGFUSE_ENV_FILE"
 
-# --- 8. Add profile.d loader to shell profile ---
+# --- 6. Add profile.d loader to shell profile ---
 LOADER_LINE='for f in "$HOME"/.agent-exporter-to-langfuse/config/*.env; do [ -f "$f" ] && . "$f"; done'
 
 if ! grep -qF "agent-exporter-to-langfuse" "$SHELL_RC" 2>/dev/null; then
@@ -260,7 +254,7 @@ else
     info "Profile.d loader already in $SHELL_RC"
 fi
 
-# --- 9. LaunchAgent for GUI apps (macOS only) ---
+# --- 7. LaunchAgent for GUI apps (macOS only) ---
 if [ "$(uname)" = "Darwin" ]; then
     mkdir -p "$LAUNCH_AGENT_DIR"
 
