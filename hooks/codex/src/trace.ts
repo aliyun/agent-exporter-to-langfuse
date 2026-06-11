@@ -121,12 +121,19 @@ async function emitTurnOtel(
       statusMessage: turn.aborted ? "Turn interrupted by user" : undefined,
       metadata: {
         "codex.turn_id": turn.turnId,
-        "codex.thread_id": sessionMeta.sessionId,
+        "codex.thread_id": sessionMeta.threadId,
         "codex.model": turn.model,
         "codex.model_provider": sessionMeta.modelProvider,
         "codex.cli_version": sessionMeta.cliVersion,
         "codex.aborted": turn.aborted,
         "codex.tool_call_count": turn.steps.reduce((n, s) => n + s.toolCalls.length, 0),
+        ...(sessionMeta.isSubagent
+          ? {
+              "codex.is_subagent": true,
+              "codex.parent_thread_id": sessionMeta.parentThreadId,
+              "codex.agent_nickname": sessionMeta.agentNickname,
+            }
+          : {}),
       },
     },
     {

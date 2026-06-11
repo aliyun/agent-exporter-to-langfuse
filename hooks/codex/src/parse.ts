@@ -95,7 +95,7 @@ export function parseSession(lines: RolloutLine[]): {
   sessionMeta: SessionMeta;
   turns: Turn[];
 } {
-  let sessionMeta: SessionMeta = { sessionId: "unknown" };
+  let sessionMeta: SessionMeta = { sessionId: "unknown", threadId: "unknown", isSubagent: false };
   const turns: Turn[] = [];
 
   let turn: MutableTurn | null = null;
@@ -145,9 +145,24 @@ export function parseSession(lines: RolloutLine[]): {
         cli_version?: string;
         model_provider?: string | null;
         base_instructions?: { text?: string } | null;
+        source?: {
+          subagent?: {
+            thread_spawn?: {
+              parent_thread_id?: string;
+              agent_nickname?: string;
+            };
+          };
+        };
       };
+      const ownId = typeof p.id === "string" ? p.id : sessionMeta.sessionId;
+      const spawn = p.source?.subagent?.thread_spawn;
+      const parentId = spawn?.parent_thread_id;
       sessionMeta = {
-        sessionId: typeof p.id === "string" ? p.id : sessionMeta.sessionId,
+        sessionId: parentId ?? ownId,
+        threadId: ownId,
+        isSubagent: !!parentId,
+        parentThreadId: parentId,
+        agentNickname: spawn?.agent_nickname,
         cliVersion: p.cli_version,
         modelProvider: p.model_provider ?? undefined,
         baseInstructions: p.base_instructions?.text,

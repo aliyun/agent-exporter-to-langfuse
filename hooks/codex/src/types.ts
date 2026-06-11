@@ -134,6 +134,10 @@ export type HookInput = {
 
 export type SessionMeta = {
   sessionId: string;
+  threadId: string;
+  isSubagent: boolean;
+  parentThreadId?: string;
+  agentNickname?: string;
   cliVersion?: string;
   modelProvider?: string;
   baseInstructions?: string;
