@@ -3,8 +3,6 @@ import re
 import subprocess
 import threading
 import time
-import urllib.request
-import json
 from pathlib import Path
 from typing import Any
 
@@ -35,24 +33,26 @@ def _read_local_version() -> str:
     return "0.0.0"
 
 
-def _check_github(repo: str, local_version: str, include_prerelease: bool = False) -> tuple[bool, str]:
-    if include_prerelease:
-        url = f"https://api.github.com/repos/{repo}/releases"
-    else:
-        url = f"https://api.github.com/repos/{repo}/releases/latest"
-    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github.v3+json"})
+def _check_latest_tag(repo: str, local_version: str, include_prerelease: bool = False) -> tuple[bool, str]:
+    repo_url = f"https://github.com/{repo}.git"
     try:
-        resp = urllib.request.urlopen(req, timeout=5)
-        data = json.loads(resp.read())
-        if include_prerelease:
-            remote = data[0].get("tag_name", "").lstrip("v") if data else ""
-        else:
-            remote = data.get("tag_name", "").lstrip("v")
-        if not remote:
+        result = subprocess.run(
+            ["git", "ls-remote", "--tags", "--sort=-v:refname", repo_url, "v*"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
             return False, local_version
-        return _parse_semver(remote) > _parse_semver(local_version), remote
+        for line in result.stdout.splitlines():
+            ref = line.split("refs/tags/")[-1] if "refs/tags/" in line else ""
+            if not ref or ref.endswith("^{}") or not re.match(r"^v\d", ref):
+                continue
+            if not include_prerelease and "-" in ref:
+                continue
+            remote = ref.lstrip("v")
+            return _parse_semver(remote) > _parse_semver(local_version), remote
     except Exception:
-        return False, local_version
+        pass
+    return False, local_version
 
 
 def _write_check_file(local: str, remote: str, available: bool) -> None:
@@ -143,7 +143,7 @@ class Updater:
             return
 
         local = _read_local_version()
-        available, remote = _check_github(self._repo, local, self._include_prerelease)
+        available, remote = _check_latest_tag(self._repo, local, self._include_prerelease)
         _write_check_file(local, remote, available)
         if available:
             logger.info("update available: v%s → v%s", local, remote)

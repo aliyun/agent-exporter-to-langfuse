@@ -47,18 +47,11 @@ LATEST_TAG="$SPECIFIED_VERSION"
 
 if [ -z "$LATEST_TAG" ]; then
     if [ "$ARG_PRE_RELEASE" = true ]; then
-        API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases"
+        LATEST_TAG=$(git ls-remote --tags --sort=-v:refname "$REPO_URL" 'v*' 2>/dev/null \
+            | grep -o 'refs/tags/v[0-9][^{}]*$' | head -1 | sed 's|refs/tags/||') || true
     else
-        API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
-    fi
-    if command -v curl &>/dev/null; then
-        LATEST_TAG=$(curl -fsSL --connect-timeout 5 "$API_URL" 2>/dev/null \
-            | grep '"tag_name"' | head -1 \
-            | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/') || true
-    elif command -v wget &>/dev/null; then
-        LATEST_TAG=$(wget -qO- --timeout=5 "$API_URL" 2>/dev/null \
-            | grep '"tag_name"' | head -1 \
-            | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/') || true
+        LATEST_TAG=$(git ls-remote --tags --sort=-v:refname "$REPO_URL" 'v*' 2>/dev/null \
+            | grep -o 'refs/tags/v[0-9][^{}]*$' | grep -v '-' | head -1 | sed 's|refs/tags/||') || true
     fi
 fi
 
