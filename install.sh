@@ -258,11 +258,13 @@ echo ""
 # Step 2: Install uv / check npm
 # ============================================================
 NEED_UV=false
+NEED_NODE=false
 NEED_NPM=false
 for agent in "${SELECTED_AGENTS[@]}"; do
     case "$agent" in
-        opencode) NEED_NPM=true ;;
-        *) NEED_UV=true ;;
+        claude-code|qoder|qoderwork) NEED_UV=true ;;
+        codex)    NEED_NODE=true ;;
+        opencode) NEED_NODE=true; NEED_NPM=true ;;
     esac
 done
 
@@ -282,6 +284,15 @@ if [ "$NEED_UV" = true ]; then
             error "uv installation failed. Install manually: https://docs.astral.sh/uv/"
             exit 1
         fi
+    fi
+fi
+
+if [ "$NEED_NODE" = true ]; then
+    if command -v node &>/dev/null; then
+        info "Node.js is available: $(node --version)"
+    else
+        error "Node.js is required but not found. Install it: https://nodejs.org/"
+        exit 1
     fi
 fi
 
