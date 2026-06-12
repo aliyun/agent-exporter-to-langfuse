@@ -136,6 +136,14 @@ else
     warn "langstash-deliver source not found at $LANGSTASH_SRC, skipping"
 fi
 
+# --- 2.6. Pre-install Python dependencies ---
+info "Installing Python dependencies ..."
+(cd "$PLUGIN_DIR/hooks" && uv sync 2>&1) || {
+    error "uv sync failed in $PLUGIN_DIR/hooks"
+    exit 1
+}
+info "Python dependencies installed."
+
 # --- 3. Detect marketplace name ---
 MARKETPLACE_NAME=""
 if claude plugin marketplace list 2>/dev/null | grep -q "$PLUGIN_DIR"; then

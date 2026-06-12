@@ -165,6 +165,14 @@ if [ -f "$SOURCE_PYPROJECT" ]; then
     info "pyproject.toml installed to $HOOK_DIR/"
 fi
 
+# --- 4.1. Pre-install Python dependencies ---
+info "Installing Python dependencies ..."
+(cd "$HOOK_DIR" && uv sync 2>&1) || {
+    error "uv sync failed in $HOOK_DIR"
+    exit 1
+}
+info "Python dependencies installed."
+
 # --- 5. Configure settings.json ---
 HOOK_COMMAND="~/.qoder/hooks/langfuse/langfuse-entrypoint.sh"
 
