@@ -11,17 +11,18 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 from src.cleaner import _dir_size_mb
-from src.config import Config
+from src.config import Config, set_config_value
 from src.ingestor import IngestError, ingest
 from src.state import IngestState, SenderState
 from src.stats import Stats
-from src.updater import get_update_info, start_upgrade
+from src.updater import Updater, get_update_info, start_upgrade
 
 logger = logging.getLogger("langstash.server")
 
 
 def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Path,
-               sender_state: SenderState, sender_state_path: Path, stats: Stats) -> FastAPI:
+               sender_state: SenderState, sender_state_path: Path, stats: Stats,
+               updater: Updater | None = None) -> FastAPI:
     app = FastAPI(title="Langstash", docs_url=None, redoc_url=None)
     data_dir = Path(config.storage.data_dir)
 
@@ -132,6 +133,24 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
         threading.Thread(target=_delayed_exit, daemon=True).start()
         return JSONResponse({"status": "restarting"})
 
+    @app.get("/settings")
+    async def get_settings() -> JSONResponse:
+        return JSONResponse({"include_prerelease": config.update.include_prerelease})
+
+    @app.post("/settings")
+    async def post_settings(request: Request) -> JSONResponse:
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"status": "error", "error": "invalid JSON"}, status_code=422)
+        if "include_prerelease" in body:
+            val = bool(body["include_prerelease"])
+            set_config_value("update", "include_prerelease", val)
+            config.update.include_prerelease = val
+            if updater:
+                updater._include_prerelease = val
+        return JSONResponse({"status": "ok"})
+
     @app.get("/favicon.svg")
     async def get_favicon() -> FileResponse:
         return FileResponse(ASSETS_DIR / "icon.svg", media_type="image/svg+xml")
@@ -181,6 +200,14 @@ body{font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;backgro
 .tokens{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center}
 .tokens .tv{font-size:18px;font-weight:600}
 .tokens .tl{font-size:11px;color:#888}
+.toggle-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0}
+.toggle-row .k{color:#888}
+.switch{position:relative;width:40px;height:22px;flex-shrink:0}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#555;border-radius:22px;transition:.2s}
+.slider:before{content:"";position:absolute;height:16px;width:16px;left:3px;bottom:3px;background:#ccc;border-radius:50%;transition:.2s}
+.switch input:checked+.slider{background:#4a9eff}
+.switch input:checked+.slider:before{transform:translateX(18px);background:#fff}
 </style>
 </head>
 <body>
@@ -214,6 +241,10 @@ body{font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;backgro
   <div id="v-stor">-</div>
   <div class="bar-bg"><div class="bar-fill" id="bar"></div></div>
 </div>
+<div class="section">
+  <h3>Settings</h3>
+  <div class="toggle-row"><span class="k">Pre-release Updates</span><label class="switch"><input type="checkbox" id="chk-pre" onchange="togglePre()"><span class="slider"></span></label></div>
+</div>
 <script>
 const $=id=>document.getElementById(id);
 const fmt=n=>{if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'k';return n};
@@ -245,6 +276,14 @@ async function poll(){
     if(d.update_available&&!window._upgrading)v+=' <span class="update-badge" onclick="doUpgrade()" title="Click to upgrade">Upgrade to v'+d.latest_version+'</span>';
     if(!window._upgrading)$('ver').innerHTML=v;
   }catch(e){$('v-traces').textContent='--'}
+  try{
+    const s=await fetch('/settings');const sd=await s.json();
+    $('chk-pre').checked=sd.include_prerelease;
+  }catch(e){}
+}
+async function togglePre(){
+  const v=$('chk-pre').checked;
+  try{await fetch('/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({include_prerelease:v})})}catch(e){$('chk-pre').checked=!v}
 }
 async function doUpgrade(){
   if(window._upgrading)return;

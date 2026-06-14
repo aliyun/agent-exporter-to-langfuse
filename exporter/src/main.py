@@ -84,13 +84,13 @@ def cli() -> None:
     updater.start()
 
     app = create_app(config, ingest_state, ingest_state_path,
-                     sender_state, sender_state_path, stats)
+                     sender_state, sender_state_path, stats, updater=updater)
 
     use_menubar = not args.server_only and sys.platform == "darwin"
     if use_menubar:
         try:
             from src.menubar import run_with_menubar
-            run_with_menubar(app, config, updater=updater)
+            run_with_menubar(app, config)
         except ImportError:
             logger.warning("rumps not installed, falling back to server-only mode")
             use_menubar = False

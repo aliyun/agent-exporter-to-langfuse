@@ -11,8 +11,6 @@ from typing import Any
 
 import rumps
 
-from src.config import CONFIG_FILE, load_config, set_config_value
-
 _ICON_PATH = str(Path(__file__).resolve().parent.parent / "assets" / "icon.svg")
 
 
@@ -28,12 +26,11 @@ def _fmt_count(n: int) -> str:
 class LangstashApp(rumps.App):
     """macOS menu bar (status bar) app for monitoring langstash export."""
 
-    def __init__(self, server_url: str, updater: Any = None) -> None:
+    def __init__(self, server_url: str) -> None:
         super().__init__("Langstash", icon=_ICON_PATH, template=True)
         self.server_url = server_url.rstrip("/")
         self._stats: dict[str, Any] = {}
-        self._updater = updater
-        self._include_prerelease = load_config().update.include_prerelease
+        self._include_prerelease = False
 
         self.timer = rumps.Timer(self._poll, 10)
         self.timer.start()
@@ -50,6 +47,14 @@ class LangstashApp(rumps.App):
             self.title = "⚠"
             self._rebuild_menu(error=True)
             return
+
+        try:
+            req = urllib.request.Request(f"{self.server_url}/settings")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                settings = json.loads(resp.read().decode())
+                self._include_prerelease = settings.get("include_prerelease", self._include_prerelease)
+        except Exception:
+            pass
 
         self._update_title()
         self._rebuild_menu()
@@ -143,11 +148,20 @@ class LangstashApp(rumps.App):
         self.menu.add(rumps.MenuItem("Quit Langstash", callback=self._quit))
 
     def _toggle_prerelease(self, sender: Any) -> None:
-        self._include_prerelease = not self._include_prerelease
-        sender.state = self._include_prerelease
-        set_config_value("update", "include_prerelease", self._include_prerelease)
-        if self._updater:
-            self._updater._include_prerelease = self._include_prerelease
+        new_val = not self._include_prerelease
+        try:
+            data = json.dumps({"include_prerelease": new_val}).encode()
+            req = urllib.request.Request(
+                f"{self.server_url}/settings",
+                data=data,
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(req, timeout=5)
+            self._include_prerelease = new_val
+            sender.state = new_val
+        except Exception:
+            pass
 
     def _do_upgrade(self, _sender: Any = None) -> None:
         try:
@@ -186,7 +200,7 @@ class LangstashApp(rumps.App):
         rumps.quit_application()
 
 
-def run_with_menubar(app: Any, config: Any, updater: Any = None) -> None:
+def run_with_menubar(app: Any, config: Any) -> None:
     """Start the FastAPI server in a daemon thread and run the menubar app.
 
     Called from main.py when on macOS and not --server-only.
@@ -211,5 +225,5 @@ def run_with_menubar(app: Any, config: Any, updater: Any = None) -> None:
     time.sleep(0.5)
 
     server_url = f"http://{host}:{port}"
-    menubar = LangstashApp(server_url, updater=updater)
+    menubar = LangstashApp(server_url)
     menubar.run()
