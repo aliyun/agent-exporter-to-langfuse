@@ -19,6 +19,11 @@ dist/
 # Claude Code local config
 .claude/
 
+# Test / Coverage
+.coverage
+htmlcov/
+coverage/
+
 # OS
 .DS_Store
 Thumbs.db
