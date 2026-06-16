@@ -68,7 +68,9 @@ def _builtin_agent_definitions() -> list[dict[str, Any]]:
             "detection": {"paths": [str(home / ".claude")], "commands": ["claude"]},
             "hook": {
                 "settingsPath": str(home / ".claude" / "settings.json"),
-                "markers": ["langstash-deliver", "langstash_deliver"],
+                "markers": ["langstash-deliver", "langstash_deliver", "langfuse-entrypoint", "langfuse_hook"],
+                "pluginCheck": str(home / ".claude" / "plugins" / "installed_plugins.json"),
+                "pluginMarker": "langfuse",
             },
         },
         {
@@ -77,7 +79,7 @@ def _builtin_agent_definitions() -> list[dict[str, Any]]:
             "detection": {"paths": [str(home / ".qoder")], "commands": ["qoder", "qodercli"]},
             "hook": {
                 "settingsPath": str(home / ".qoder" / "settings.json"),
-                "markers": ["langstash-deliver", "langstash_deliver"],
+                "markers": ["langstash-deliver", "langstash_deliver", "langfuse-entrypoint", "langfuse_hook"],
             },
         },
         {
@@ -86,7 +88,7 @@ def _builtin_agent_definitions() -> list[dict[str, Any]]:
             "detection": {"paths": [str(home / ".qoderwork")]},
             "hook": {
                 "settingsPath": str(home / ".qoderwork" / "settings.json"),
-                "markers": ["langstash-deliver", "langstash_deliver"],
+                "markers": ["langstash-deliver", "langstash_deliver", "langfuse-entrypoint", "langfuse_hook"],
             },
         },
         {
@@ -95,7 +97,8 @@ def _builtin_agent_definitions() -> list[dict[str, Any]]:
             "detection": {"paths": [str(home / ".config" / "opencode")], "commands": ["opencode"]},
             "hook": {
                 "settingsPath": str(home / ".config" / "opencode" / "hooks.json"),
-                "markers": ["langstash-deliver", "langstash_deliver"],
+                "markers": ["langstash-deliver", "langstash_deliver", "langfuse-exporter"],
+                "fileCheck": str(home / ".config" / "opencode" / "plugins" / "langfuse-exporter.mjs"),
             },
         },
         {
@@ -104,7 +107,7 @@ def _builtin_agent_definitions() -> list[dict[str, Any]]:
             "detection": {"paths": [str(home / ".codex")], "commands": ["codex"]},
             "hook": {
                 "settingsPath": str(home / ".codex" / "hooks.json"),
-                "markers": ["langstash-deliver", "langstash_deliver"],
+                "markers": ["langstash-deliver", "langstash_deliver", "langfuse-entrypoint", "hooks/langfuse"],
             },
         },
     ]
@@ -176,9 +179,30 @@ def _detect_agent_installed(defn: dict[str, Any]) -> bool:
 
 def _check_hook_markers(defn: dict[str, Any]) -> bool:
     hook_conf = defn.get("hook", {})
-    settings_path = hook_conf.get("settingsPath", "")
     markers = hook_conf.get("markers", [])
 
+    # Check plugin install (e.g., Claude Code plugin system)
+    plugin_check = hook_conf.get("pluginCheck", "")
+    plugin_marker = hook_conf.get("pluginMarker", "")
+    if plugin_check and plugin_marker:
+        expanded = os.path.expanduser(plugin_check)
+        if os.path.isfile(expanded):
+            try:
+                with open(expanded) as f:
+                    content = f.read()
+                if plugin_marker in content.lower():
+                    return True
+            except OSError:
+                pass
+
+    # Check file existence (e.g., OpenCode plugin file)
+    file_check = hook_conf.get("fileCheck", "")
+    if file_check:
+        if os.path.isfile(os.path.expanduser(file_check)):
+            return True
+
+    # Check settings/hooks config file for markers
+    settings_path = hook_conf.get("settingsPath", "")
     if not settings_path or not markers:
         return False
 

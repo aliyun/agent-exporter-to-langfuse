@@ -159,6 +159,24 @@ list_known_agents() {
     fi
 }
 
+install_detected_hooks() {
+    local ver_dir="$1"
+    local agents
+    agents="$(list_known_agents "$ver_dir")"
+    if [ -z "$agents" ]; then
+        return
+    fi
+    info "Installing hooks for detected agents ..."
+    for agent in $agents; do
+        local script="$ver_dir/hooks/$agent/install.sh"
+        if [ -f "$script" ]; then
+            info "Installing hook: $agent"
+            bash "$script" --upgrade -y 2>&1 || warn "Hook $agent installation had warnings"
+            write_hook_state_entry "$agent" "$(read_pointer current)" "installed"
+        fi
+    done
+}
+
 stop_langstash() {
     if [ "$(uname)" = "Darwin" ]; then
         launchctl unload "$HOME/Library/LaunchAgents/com.langstash.plist" 2>/dev/null || true
@@ -208,9 +226,20 @@ cmd_install() {
         case "$1" in
             --version) version="$2"; shift 2 ;;
             --package-url) package_url="$2"; shift 2 ;;
+            --secret-key)  LANGFUSE_SECRET_KEY="$2"; shift 2 ;;
+            --public-key)  LANGFUSE_PUBLIC_KEY="$2"; shift 2 ;;
+            --base-url)    LANGFUSE_BASE_URL="$2"; shift 2 ;;
+            --user-id)     LANGFUSE_USER_ID="$2"; shift 2 ;;
+            --tags)        LANGFUSE_TAGS="$2"; shift 2 ;;
             *) error "install: unknown option: $1"; exit 1 ;;
         esac
     done
+
+    export LANGFUSE_SECRET_KEY="${LANGFUSE_SECRET_KEY:-}"
+    export LANGFUSE_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}"
+    export LANGFUSE_BASE_URL="${LANGFUSE_BASE_URL:-}"
+    export LANGFUSE_USER_ID="${LANGFUSE_USER_ID:-}"
+    export LANGFUSE_TAGS="${LANGFUSE_TAGS:-}"
 
     mkdir -p "$INSTALL_DIR/versions" "$INSTALL_DIR/config" "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
 
@@ -313,6 +342,9 @@ cmd_install() {
         bash "$ver_dir/exporter/install-langstash.sh" || warn "langstash service installation skipped"
     fi
 
+    # Install hooks for detected agents
+    install_detected_hooks "$ver_dir"
+
     # Install CLI wrapper
     install_wrapper
 
@@ -383,6 +415,27 @@ cmd_uninstall() {
     if command -v systemctl &>/dev/null; then
         systemctl --user daemon-reload 2>/dev/null || true
     fi
+
+    # Remove shell profile loader
+    for rc_file in "$HOME/.zshenv" "$HOME/.profile" "$HOME/.bashrc"; do
+        if [ -f "$rc_file" ] && grep -qF "agent-exporter-to-langfuse" "$rc_file" 2>/dev/null; then
+            python3 -c "
+import sys
+lines = open(sys.argv[1]).readlines()
+out = [l for l in lines if 'agent-exporter-to-langfuse' not in l]
+open(sys.argv[1], 'w').writelines(out)
+" "$rc_file" 2>/dev/null && info "Removed profile loader from $rc_file"
+        fi
+    done
+
+    # Remove per-agent env LaunchAgents
+    for plist in "$HOME/Library/LaunchAgents"/com.*.langfuse-env.plist; do
+        if [ -f "$plist" ]; then
+            launchctl unload "$plist" 2>/dev/null || true
+            rm -f "$plist"
+            info "Removed $(basename "$plist")"
+        fi
+    done
 
     if [ "$purge" = true ]; then
         info "Purging config, data, and logs ..."
@@ -867,6 +920,14 @@ Commands:
 Install Options:
   --version VER       Install specific version
   --package-url URL   Use a custom package URL (supports file://)
+  --secret-key KEY    Langfuse Secret Key
+  --public-key KEY    Langfuse Public Key
+  --base-url URL      Langfuse Base URL
+  --user-id ID        Langfuse User ID (optional)
+  --tags TAGS         Extra tags, comma-separated (optional)
+
+  Environment variables LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY,
+  LANGFUSE_BASE_URL, LANGFUSE_USER_ID, LANGFUSE_TAGS are also accepted.
 
 Upgrade Options:
   --version VER       Upgrade to specific version

@@ -4,7 +4,8 @@
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-exporter-to-langfuse}"
-EXPORTER_DIR="$INSTALL_DIR/exporter"
+SCRIPT_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+EXPORTER_DIR="${EXPORTER_DIR:-$SCRIPT_SELF_DIR}"
 CONFIG_DIR="$INSTALL_DIR/config"
 DATA_DIR="$INSTALL_DIR/data"
 LOGS_DIR="$INSTALL_DIR/logs"

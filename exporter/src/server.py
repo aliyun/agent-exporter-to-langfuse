@@ -12,6 +12,13 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 from src.cleaner import _dir_size_mb
 from src.config import Config, set_config_value
+from src.hook_state import (
+    HookStatus,
+    get_mismatch_info,
+    load_hook_state,
+    probe_hook_states,
+    update_hook_entry,
+)
 from src.ingestor import IngestError, ingest
 from src.state import IngestState, SenderState
 from src.stats import Stats
@@ -22,9 +29,11 @@ logger = logging.getLogger("langstash.server")
 
 def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Path,
                sender_state: SenderState, sender_state_path: Path, stats: Stats,
-               updater: Updater | None = None) -> FastAPI:
+               updater: Updater | None = None,
+               hook_states: dict | None = None) -> FastAPI:
     app = FastAPI(title="Langstash", docs_url=None, redoc_url=None)
     data_dir = Path(config.storage.data_dir)
+    _hook_states = hook_states or {}
 
     @app.post("/ingest")
     async def post_ingest(request: Request) -> JSONResponse:
@@ -101,6 +110,11 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
                 "retries": sender_state.last_error.retries,
             }
         result.update(update_info)
+        current_hook_states = load_hook_state()
+        mismatch, mismatch_agents = get_mismatch_info(current_hook_states)
+        result["hooks"] = current_hook_states
+        result["hook_version_mismatch"] = mismatch
+        result["hook_mismatch_agents"] = mismatch_agents
         return JSONResponse(result)
 
     @app.get("/health")
@@ -123,6 +137,22 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
         if not started:
             return JSONResponse({"status": "error", "message": "upgrade script not found"}, status_code=500)
         return JSONResponse({"status": "started", "upgrading_to": info.get("latest_version", "")})
+
+    @app.post("/upgrade/retry-hooks")
+    async def post_retry_hooks(request: Request) -> JSONResponse:
+        agent = request.query_params.get("agent")
+        try:
+            started = start_upgrade(retry_hooks=True)
+            if not started:
+                return JSONResponse(
+                    {"status": "error", "message": "installer script not found"},
+                    status_code=500,
+                )
+            return JSONResponse({"status": "started", "scope": agent or "all"})
+        except Exception as e:
+            return JSONResponse(
+                {"status": "error", "message": str(e)}, status_code=500
+            )
 
     @app.post("/restart")
     async def post_restart() -> JSONResponse:
@@ -236,6 +266,11 @@ body{font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;backgro
   <div class="row"><span class="k">Last error</span><span class="v" id="v-le">-</span></div>
   <div class="row"><span class="k">Uptime</span><span class="v" id="v-up">-</span></div>
 </div>
+<div id="hook-alert" style="display:none;background:#6a3a2d;color:#ffb088;padding:10px 16px;border-radius:8px;margin-bottom:12px;font-size:13px"></div>
+<div class="section" id="hooks-section">
+  <h3>Hooks</h3>
+  <div id="hooks-list"></div>
+</div>
 <div class="section">
   <h3>Storage</h3>
   <div id="v-stor">-</div>
@@ -275,6 +310,7 @@ async function poll(){
     let v='v'+d.current_version;
     if(d.update_available&&!window._upgrading)v+=' <span class="update-badge" onclick="doUpgrade()" title="Click to upgrade">Upgrade to v'+d.latest_version+'</span>';
     if(!window._upgrading)$('ver').innerHTML=v;
+    renderHooks(d);
   }catch(e){$('v-traces').textContent='--'}
   try{
     const s=await fetch('/settings');const sd=await s.json();
@@ -320,6 +356,32 @@ async function doRestart(){
     },1000);
     setTimeout(()=>{clearInterval(iv);btn.classList.remove('restarting');btn.textContent='Restart'},30000);
   },1000);
+}
+function renderHooks(d){
+  const el=$('hooks-list');const alert=$('hook-alert');
+  if(!d.hooks||!Object.keys(d.hooks).length){$('hooks-section').style.display='none';alert.style.display='none';return}
+  $('hooks-section').style.display='';
+  const sc={installed:'#4a9',error:'#f66',not_installed:'#888',undetected:'#666'};
+  const sl={installed:'Installed',error:'Error',not_installed:'Not Installed',undetected:'Not Detected'};
+  let html='';
+  for(const[a,h]of Object.entries(d.hooks)){
+    const c=sc[h.status]||'#888';const l=sl[h.status]||h.status;
+    html+='<div class="row"><span class="k">'+a+'</span><span class="v">';
+    html+='<span style="color:'+c+'">'+l+'</span>';
+    if(h.error)html+=' <span style="color:#f66;font-size:12px">'+h.error+'</span>';
+    if(h.status==='error')html+=' <button onclick="retryHook(&quot;'+a+'&quot;)" style="background:#444;color:#ccc;border:none;padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;margin-left:6px">Retry</button>';
+    if(h.status==='not_installed')html+=' <button onclick="retryHook(&quot;'+a+'&quot;)" style="background:#2d6a2d;color:#8f8;border:none;padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;margin-left:6px">Install</button>';
+    html+='</span></div>';
+  }
+  el.innerHTML=html;
+  if(d.hook_version_mismatch&&d.hook_mismatch_agents?.length){
+    alert.style.display='';alert.innerHTML='Hook version mismatch: '+d.hook_mismatch_agents.join(', ')+' <button onclick="retryHook()" style="background:#444;color:#ccc;border:none;padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;margin-left:6px">Retry All</button>';
+  }else{alert.style.display='none'}
+}
+async function retryHook(agent){
+  const url=agent?'/upgrade/retry-hooks?agent='+agent:'/upgrade/retry-hooks';
+  try{await fetch(url,{method:'POST'})}catch(e){}
+  setTimeout(poll,2000);
 }
 poll();setInterval(poll,10000);
 </script>
