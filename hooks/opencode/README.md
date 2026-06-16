@@ -37,7 +37,7 @@ Credentials are stored in a dedicated file `~/.config/opencode/langfuse.env`. Th
 
 | Platform | Shell | GUI Apps |
 |----------|-------|----------|
-| macOS | `~/.zshenv` sources `langfuse.env` | LaunchAgent (`~/Library/LaunchAgents/com.opencode.langfuse-env.plist`) |
+| macOS | `~/.zshenv` sources `langfuse.env` | Inherited from shell profile |
 | Linux | `~/.profile` sources `langfuse.env` | Inherited from shell profile |
 
 ## Requirements
@@ -122,7 +122,6 @@ The uninstall script removes:
 - Plugin reference from `~/.config/opencode/opencode.json`
 - Plugin file (`~/.config/opencode/plugins/langfuse-exporter.mjs`)
 - Environment file (`~/.config/opencode/langfuse.env`) and the source line from the shell profile
-- LaunchAgent (`~/Library/LaunchAgents/com.opencode.langfuse-env.plist`) on macOS
 - Log files (`~/.config/opencode/logs/langfuse-exporter/`)
 
 ## Troubleshooting

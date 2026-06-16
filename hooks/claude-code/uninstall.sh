@@ -3,7 +3,6 @@ set -euo pipefail
 
 LANGFUSE_PROFILE_DIR="$HOME/.agent-exporter-to-langfuse/config"
 LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/claude-code.env"
-LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/com.claude-code.langfuse-env.plist"
 
 if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
     SHELL_RC="$HOME/.zshenv"
@@ -68,22 +67,7 @@ open(sys.argv[1], 'w').writelines(out)
     fi
 fi
 
-# --- 4. Remove LaunchAgent (macOS) ---
-if [ "$(uname)" = "Darwin" ]; then
-    if [ -f "$LAUNCH_AGENT_PLIST" ]; then
-        launchctl unload "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
-        rm -f "$LAUNCH_AGENT_PLIST"
-        info "Removed LaunchAgent: $LAUNCH_AGENT_PLIST"
-
-        launchctl unsetenv LANGFUSE_BASE_URL 2>/dev/null || true
-        launchctl unsetenv LANGFUSE_PUBLIC_KEY 2>/dev/null || true
-        launchctl unsetenv LANGFUSE_SECRET_KEY 2>/dev/null || true
-    else
-        warn "LaunchAgent not found, skipping."
-    fi
-fi
-
-# --- 5. Remove state files ---
+# --- 4. Remove state files ---
 STATE_DIR="$HOME/.claude/state"
 removed_state=false
 for f in "$STATE_DIR/langfuse_hook.log"* "$STATE_DIR/langfuse_state.json" "$STATE_DIR/langfuse_state.lock"; do

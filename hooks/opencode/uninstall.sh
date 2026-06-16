@@ -7,7 +7,6 @@ PLUGIN_FILE="$OC_CONFIG_DIR/plugins/langfuse-exporter.mjs"
 LANGFUSE_PROFILE_DIR="$HOME/.agent-exporter-to-langfuse/config"
 LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/opencode.env"
 LOG_DIR="$OC_CONFIG_DIR/logs/langfuse-exporter"
-LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/com.opencode.langfuse-env.plist"
 
 if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
     SHELL_RC="$HOME/.zshenv"
@@ -103,18 +102,7 @@ open(sys.argv[1], 'w').writelines(out)
     fi
 fi
 
-# --- 5. Remove LaunchAgent (macOS) ---
-if [ "$(uname)" = "Darwin" ]; then
-    if [ -f "$LAUNCH_AGENT_PLIST" ]; then
-        launchctl unload "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
-        rm -f "$LAUNCH_AGENT_PLIST"
-        info "Removed LaunchAgent: $LAUNCH_AGENT_PLIST"
-    else
-        warn "LaunchAgent not found, skipping."
-    fi
-fi
-
-# --- 6. Remove log files ---
+# --- 5. Remove log files ---
 if [ -d "$LOG_DIR" ]; then
     rm -rf "$LOG_DIR"
     info "Removed log directory: $LOG_DIR"

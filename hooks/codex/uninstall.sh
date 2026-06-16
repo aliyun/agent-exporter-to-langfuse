@@ -127,16 +127,7 @@ open(sys.argv[1], 'w').writelines(out)
     fi
 fi
 
-# --- 5. Remove LaunchAgent (macOS only) ---
-LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/com.codex.langfuse-env.plist"
-
-if [ "$(uname)" = "Darwin" ] && [ -f "$LAUNCH_AGENT_PLIST" ]; then
-    launchctl unload "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
-    rm -f "$LAUNCH_AGENT_PLIST"
-    info "Removed LaunchAgent: $LAUNCH_AGENT_PLIST"
-fi
-
-# --- 6. Remove state files ---
+# --- 5. Remove state files ---
 STATE_DIR="$CODEX_HOME/state"
 removed_state=false
 for f in "$STATE_DIR/langfuse_hook.log"* "$STATE_DIR/langfuse_state.json" "$STATE_DIR/langfuse_state.lock"; do

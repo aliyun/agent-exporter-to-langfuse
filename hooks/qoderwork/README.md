@@ -37,7 +37,7 @@ Credentials are stored in a dedicated file `~/.qoderwork/langfuse.env`. The shel
 
 | Platform | Shell | GUI Apps |
 |----------|-------|----------|
-| macOS | `~/.zshenv` sources `~/.qoderwork/langfuse.env` | LaunchAgent (`~/Library/LaunchAgents/com.qoderwork.langfuse-env.plist`) |
+| macOS | `~/.zshenv` sources `~/.qoderwork/langfuse.env` | Inherited from shell profile |
 | Linux | `~/.profile` sources `~/.qoderwork/langfuse.env` | Inherited from shell profile |
 
 ## Requirements
@@ -92,11 +92,11 @@ QoderWork Desktop executes all hook commands inside a Linux VM (Ubuntu aarch64, 
 | `$HOME` | `/Users/<user>` | `/root` |
 | Shell | `/bin/zsh` | `/usr/bin/bash` |
 | Python venv | macOS arm64 binaries | Linux aarch64 binaries |
-| Environment variables | From shell profile / LaunchAgent | Must be sourced from `langfuse.env` by entrypoint |
+| Environment variables | From shell profile | Must be sourced from `langfuse.env` by entrypoint |
 
 The `langfuse-entrypoint.sh` wrapper script handles these differences:
 
-1. **Sources `~/.qoderwork/langfuse.env`** to inject Langfuse credentials into the VM environment (shell profile and LaunchAgent settings do not propagate into the VM)
+1. **Sources `~/.qoderwork/langfuse.env`** to inject Langfuse credentials into the VM environment (shell profile settings do not propagate into the VM)
 2. **Auto-rebuilds the Python venv** on first run — the macOS `.venv` created by `install.sh` contains Mach-O binaries that cannot execute on Linux; the entrypoint detects this and recreates the venv using the VM's system `python3`
 3. **Uses `~` paths in `settings.json`** — absolute macOS paths (`/Users/...`) do not exist inside the VM; tilde expands to `$HOME` at runtime on both platforms
 
@@ -170,7 +170,6 @@ The uninstall script removes:
 - Hook script and uv environment (`~/.qoderwork/hooks/langfuse/`)
 - Stop hook entry from `~/.qoderwork/settings.json`
 - Environment file (`~/.qoderwork/langfuse.env`) and the source line from the shell profile
-- LaunchAgent (`~/Library/LaunchAgents/com.qoderwork.langfuse-env.plist`) on macOS
 - State and log files (`~/.qoderwork/state/langfuse_*`)
 
 ## Troubleshooting
