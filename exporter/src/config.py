@@ -1,7 +1,10 @@
+import logging
 import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger("langstash.config")
 
 
 INSTALL_DIR = Path.home() / ".agent-exporter-to-langfuse"
@@ -51,6 +54,7 @@ class SenderConfig:
     max_backoff_seconds: int = 300
     batch_size: int = 10
     timeout_seconds: int = 30
+    max_payload_bytes: int = 3_500_000
 
 
 @dataclass
@@ -95,6 +99,13 @@ def load_config(path: Path | None = None) -> Config:
         for k, v in raw["sender"].items():
             if hasattr(cfg.sender, k):
                 setattr(cfg.sender, k, v)
+
+    if cfg.sender.max_payload_bytes < 100_000:
+        logger.warning(
+            "max_payload_bytes=%d is below minimum, clamping to 100000",
+            cfg.sender.max_payload_bytes,
+        )
+        cfg.sender.max_payload_bytes = 100_000
 
     if "update" in raw:
         for k, v in raw["update"].items():
