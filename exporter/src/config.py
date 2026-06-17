@@ -8,6 +8,23 @@ INSTALL_DIR = Path.home() / ".agent-exporter-to-langfuse"
 CONFIG_FILE = INSTALL_DIR / "config" / "config.toml"
 
 
+def find_installer() -> Path | None:
+    candidates = [
+        INSTALL_DIR / "deploy" / "installer.sh",
+    ]
+    current_pointer = INSTALL_DIR / "current"
+    if current_pointer.is_file():
+        ver = current_pointer.read_text().strip()
+        if ver:
+            candidates.insert(0, INSTALL_DIR / "versions" / ver / "deploy" / "installer.sh")
+
+    for p in candidates:
+        if p.is_file():
+            return p
+    legacy = INSTALL_DIR / "upgrade.sh"
+    return legacy if legacy.is_file() else None
+
+
 @dataclass
 class ServerConfig:
     host: str = "127.0.0.1"

@@ -6,12 +6,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from src.config import INSTALL_DIR
+from src.config import INSTALL_DIR, find_installer
 
 logger = logging.getLogger("langstash.updater")
 
 UPDATE_CHECK_FILE = INSTALL_DIR / ".update-check"
-VERSION_FILE = INSTALL_DIR / "VERSION"
 DEFAULT_REPO = "aliyun/agent-exporter-to-langfuse"
 
 _SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$")
@@ -27,29 +26,53 @@ def _parse_semver(v: str) -> tuple[int, int, int, int, str]:
     return (major, minor, patch, 0 if pre else 1, pre)
 
 
+def _resolve_version_file() -> Path:
+    pointer = INSTALL_DIR / "current"
+    if pointer.is_file():
+        ver = pointer.read_text().strip()
+        if ver:
+            versioned = INSTALL_DIR / "versions" / ver / "VERSION"
+            if versioned.is_file():
+                return versioned
+    legacy = INSTALL_DIR / "VERSION"
+    return legacy
+
+
 def _read_local_version() -> str:
-    if VERSION_FILE.exists():
-        return VERSION_FILE.read_text().strip()
+    vf = _resolve_version_file()
+    if vf.is_file():
+        return vf.read_text().strip()
     return "0.0.0"
 
 
-def _check_latest_tag(repo: str, local_version: str, include_prerelease: bool = False) -> tuple[bool, str]:
-    repo_url = f"https://github.com/{repo}.git"
+def _check_latest_release(repo: str, local_version: str, include_prerelease: bool = False) -> tuple[bool, str]:
+    import urllib.request
+    import json
+
     try:
-        result = subprocess.run(
-            ["git", "ls-remote", "--tags", "--sort=-v:refname", repo_url, "v*"],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0:
+        if include_prerelease:
+            url = f"https://api.github.com/repos/{repo}/releases"
+        else:
+            url = f"https://api.github.com/repos/{repo}/releases/latest"
+
+        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+
+        if include_prerelease:
+            if not data:
+                return False, local_version
+            release = data[0]
+        else:
+            release = data
+
+        tag = release.get("tag_name", "")
+        if not tag:
             return False, local_version
-        for line in result.stdout.splitlines():
-            ref = line.split("refs/tags/")[-1] if "refs/tags/" in line else ""
-            if not ref or ref.endswith("^{}") or not re.match(r"^v\d", ref):
-                continue
-            if not include_prerelease and "-" in ref:
-                continue
-            remote = ref.lstrip("v")
-            return _parse_semver(remote) > _parse_semver(local_version), remote
+
+        remote = tag.lstrip("v")
+        return _parse_semver(remote) > _parse_semver(local_version), remote
+
     except Exception:
         pass
     return False, local_version
@@ -89,13 +112,27 @@ def get_update_info() -> dict[str, Any]:
 UPGRADE_LOG = INSTALL_DIR / "logs" / "upgrade.log"
 
 
-def start_upgrade(include_prerelease: bool = False) -> bool:
-    upgrade_script = INSTALL_DIR / "upgrade.sh"
-    if not upgrade_script.exists():
+def start_upgrade(include_prerelease: bool = False, retry_hooks: bool = False,
+                   retry_agent: str | None = None) -> bool:
+    installer = find_installer()
+    if not installer:
         return False
-    cmd = ["bash", str(upgrade_script)]
-    if include_prerelease:
-        cmd.append("--pre-release")
+
+    if retry_hooks:
+        cmd = ["bash", str(installer), "upgrade", "--retry-hooks"]
+        if retry_agent:
+            cmd.extend(["--agent", retry_agent])
+    elif str(installer).endswith("upgrade.sh"):
+        cmd = ["bash", str(installer)]
+        if include_prerelease:
+            cmd.append("--pre-release")
+    else:
+        info = get_update_info()
+        latest = info.get("latest_version", "")
+        if not latest:
+            return False
+        cmd = ["bash", str(installer), "upgrade", "--version", latest]
+
     UPGRADE_LOG.parent.mkdir(parents=True, exist_ok=True)
     with open(UPGRADE_LOG, "w") as log:
         subprocess.Popen(
@@ -143,7 +180,7 @@ class Updater:
             return
 
         local = _read_local_version()
-        available, remote = _check_latest_tag(self._repo, local, self._include_prerelease)
+        available, remote = _check_latest_release(self._repo, local, self._include_prerelease)
         _write_check_file(local, remote, available)
         if available:
             logger.info("update available: v%s → v%s", local, remote)

@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify VERSION file matches tag
+        run: |
+          file_version="$(cat VERSION | tr -d '[:space:]')"
+          tag_version="${{ steps.version.outputs.version }}"
+          if [ "$file_version" != "$tag_version" ]; then
+            echo "ERROR: VERSION file ($file_version) does not match tag ($tag_version)"
+            exit 1
+          fi
+
+      - name: Build release package
+        run: bash deploy/package.sh --output-dir dist
+
+      - name: Determine pre-release
+        id: prerelease
+        run: |
+          if echo "${{ steps.version.outputs.version }}" | grep -q '-'; then
+            echo "flag=--prerelease" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            ${{ steps.prerelease.outputs.flag }} \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            dist/agent-exporter-to-langfuse-${{ steps.version.outputs.version }}.tar.gz \
+            dist/SHA256SUMS

@@ -8,15 +8,6 @@ PLUGIN_DIR="$SCRIPT_DIR"
 LANGFUSE_PROFILE_DIR="$HOME/.agent-exporter-to-langfuse/config"
 LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/claude-code.env"
 
-# Shell profile
-if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
-    SHELL_RC="$HOME/.zshenv"
-else
-    SHELL_RC="$HOME/.profile"
-fi
-LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
-LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.claude-code.langfuse-env.plist"
-
 # --- Colors ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -208,59 +199,6 @@ mkdir -p "$LANGFUSE_PROFILE_DIR"
     echo "export LANGSTASH_URL=\"http://127.0.0.1:5288\""
 } > "$LANGFUSE_ENV_FILE"
 info "Env vars written to $LANGFUSE_ENV_FILE"
-
-# --- 6. Add profile.d loader to shell profile (one-time, shared across all agents) ---
-LOADER_LINE='for f in "$HOME"/.agent-exporter-to-langfuse/config/*.env; do [ -f "$f" ] && . "$f"; done'
-
-if ! grep -qF "agent-exporter-to-langfuse" "$SHELL_RC" 2>/dev/null; then
-    printf '\n# Agent Langfuse Exporters\n%s\n' "$LOADER_LINE" >> "$SHELL_RC"
-    info "Added profile.d loader to $SHELL_RC"
-else
-    info "Profile.d loader already in $SHELL_RC"
-fi
-
-# --- 7. LaunchAgent for GUI apps (macOS only) ---
-if [ "$(uname)" = "Darwin" ]; then
-    mkdir -p "$LAUNCH_AGENT_DIR"
-
-    if [ -f "$LAUNCH_AGENT_PLIST" ]; then
-        launchctl unload "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
-    fi
-
-    cat > "$LAUNCH_AGENT_PLIST" << 'PLISTEOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.claude-code.langfuse-env</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/bash</string>
-        <string>-c</string>
-        <string>
-for f in "$HOME"/.agent-exporter-to-langfuse/config/*.env; do
-    [ -f "$f" ] && . "$f"
-done
-env | grep -E '^(LANGFUSE_|LANGFUSE_)' | while IFS='=' read -r k v; do
-    launchctl setenv "$k" "$v"
-done
-        </string>
-    </array>
-</dict>
-</plist>
-PLISTEOF
-
-    launchctl load "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
-    . "$LANGFUSE_ENV_FILE"
-    env | grep -E '^(LANGFUSE_|LANGSTASH_)' | while IFS='=' read -r k v; do
-        launchctl setenv "$k" "$v"
-    done
-
-    info "LaunchAgent created at $LAUNCH_AGENT_PLIST"
-fi
 
 echo ""
 info "Installation complete!"

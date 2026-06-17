@@ -47,7 +47,7 @@ Credentials are stored in a dedicated file `~/.qoder/langfuse.env`. The shell pr
 
 | Platform | Shell | GUI Apps |
 |----------|-------|----------|
-| macOS | `~/.zshenv` sources `~/.qoder/langfuse.env` | LaunchAgent (`~/Library/LaunchAgents/com.qoder.langfuse-env.plist`) |
+| macOS | `~/.zshenv` sources `~/.qoder/langfuse.env` | Inherited from shell profile |
 | Linux | `~/.profile` sources `~/.qoder/langfuse.env` | Inherited from shell profile |
 
 ## Requirements
@@ -182,7 +182,6 @@ The uninstall script removes:
 - Hook script and uv environment (`~/.qoder/hooks/langfuse/`)
 - Stop hook entry from `~/.qoder/settings.json`
 - Environment file (`~/.qoder/langfuse.env`) and the source line from the shell profile
-- LaunchAgent (`~/Library/LaunchAgents/com.qoder.langfuse-env.plist`) on macOS
 - State and log files (`~/.qoder/state/langfuse_*`)
 
 ## Troubleshooting
