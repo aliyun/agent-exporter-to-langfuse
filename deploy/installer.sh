@@ -268,16 +268,22 @@ cmd_install() {
             sums_url="${base_dir}/SHA256SUMS"
         fi
     else
-        if [ -z "$version" ]; then
-            version="latest"
+        if [ -z "$version" ] || [ "$version" = "latest" ]; then
+            info "Querying latest release version ..."
+            local api_url="https://api.github.com/repos/${DEFAULT_REPO}/releases?per_page=1"
+            local release_json
+            release_json="$(curl -fsSL "$api_url")" || {
+                error "Failed to query GitHub releases API"
+                exit 1
+            }
+            version="$(echo "$release_json" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['tag_name'].lstrip('v'))")" || {
+                error "No releases found for ${DEFAULT_REPO}"
+                exit 1
+            }
+            info "Latest version: $version"
         fi
-        if [ "$version" = "latest" ]; then
-            tarball_url="https://github.com/${DEFAULT_REPO}/releases/latest/download/agent-exporter-to-langfuse.tar.gz"
-            sums_url="https://github.com/${DEFAULT_REPO}/releases/latest/download/SHA256SUMS"
-        else
-            tarball_url="https://github.com/${DEFAULT_REPO}/releases/download/v${version}/agent-exporter-to-langfuse-${version}.tar.gz"
-            sums_url="https://github.com/${DEFAULT_REPO}/releases/download/v${version}/SHA256SUMS"
-        fi
+        tarball_url="https://github.com/${DEFAULT_REPO}/releases/download/v${version}/agent-exporter-to-langfuse-${version}.tar.gz"
+        sums_url="https://github.com/${DEFAULT_REPO}/releases/download/v${version}/SHA256SUMS"
     fi
 
     # Download
