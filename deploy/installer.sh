@@ -359,6 +359,12 @@ cmd_install() {
     # Install hooks for detected agents
     install_detected_hooks "$ver_dir"
 
+    # Start langstash and verify
+    restart_langstash
+    if ! wait_health; then
+        warn "langstash did not start — check 'systemctl --user status langstash' or 'journalctl --user -u langstash'"
+    fi
+
     # Install CLI wrapper
     install_wrapper
 
@@ -894,7 +900,7 @@ with open(path, 'wb') as f:
         if [ -f "$svc" ]; then
             # Update ExecStart line
             if command -v sed &>/dev/null; then
-                sed -i.bak "s|^ExecStart=.*|ExecStart=${langstash_bin} --server-only|" "$svc" 2>/dev/null || true
+                sed -i.bak "s|^ExecStart=.*|ExecStart=${langstash_bin} run --server-only|" "$svc" 2>/dev/null || true
                 rm -f "${svc}.bak" 2>/dev/null || true
             fi
             systemctl --user daemon-reload 2>/dev/null || true

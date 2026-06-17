@@ -194,8 +194,7 @@ def cli() -> None:
     parser = argparse.ArgumentParser(prog="langstash", description="Local buffer for Agent Exporter to Langfuse")
     subparsers = parser.add_subparsers(dest="command")
 
-    # run (default, backward compatible)
-    run_parser = subparsers.add_parser("run", help="Start the langstash server (default)")
+    run_parser = subparsers.add_parser("run", help="Start the langstash server")
     run_parser.add_argument("--server-only", action="store_true", help="Run without macOS menubar")
     run_parser.add_argument("--config", type=str, default=None, help="Path to config.toml")
     run_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
@@ -216,15 +215,9 @@ def cli() -> None:
 
     args = parser.parse_args()
 
-    # Backward compatibility: no subcommand or old-style flags -> run
     if args.command is None:
-        # Check for old-style flags
-        parser2 = argparse.ArgumentParser(prog="langstash")
-        parser2.add_argument("--server-only", action="store_true")
-        parser2.add_argument("--config", type=str, default=None)
-        parser2.add_argument("--debug", action="store_true")
-        args = parser2.parse_args()
-        args.command = "run"
+        parser.print_help()
+        sys.exit(1)
 
     commands = {
         "run": cmd_run,
@@ -237,11 +230,7 @@ def cli() -> None:
         "uninstall": cmd_uninstall,
     }
 
-    handler = commands.get(args.command)
-    if handler is None:
-        parser.print_help()
-        sys.exit(1)
-
+    handler = commands[args.command]
     result = handler(args)
     if isinstance(result, int) and result != 0:
         sys.exit(result)

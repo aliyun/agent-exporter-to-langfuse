@@ -116,7 +116,7 @@ else
 Description=langstash - Agent Exporter to Langfuse
 
 [Service]
-ExecStart=${LANGSTASH_BIN} --server-only
+ExecStart=${LANGSTASH_BIN} run --server-only
 Restart=always
 RestartSec=5
 
@@ -124,8 +124,8 @@ RestartSec=5
 WantedBy=default.target
 SVCEOF
 
-    systemctl --user daemon-reload 2>/dev/null || true
-    systemctl --user enable --now langstash 2>/dev/null || true
+    systemctl --user daemon-reload 2>/dev/null || warn "systemctl daemon-reload failed (is XDG_RUNTIME_DIR set?)"
+    systemctl --user enable langstash 2>/dev/null || warn "systemctl enable failed"
     info "systemd service installed: $SERVICE_FILE"
 fi
 
