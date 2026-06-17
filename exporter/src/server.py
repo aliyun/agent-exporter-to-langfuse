@@ -142,7 +142,7 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
     async def post_retry_hooks(request: Request) -> JSONResponse:
         agent = request.query_params.get("agent")
         try:
-            started = start_upgrade(retry_hooks=True)
+            started = start_upgrade(retry_hooks=True, retry_agent=agent)
             if not started:
                 return JSONResponse(
                     {"status": "error", "message": "installer script not found"},

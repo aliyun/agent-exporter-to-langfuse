@@ -203,3 +203,28 @@ class TestSettings:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 422
+
+
+class TestRetryHooks:
+    def test_retry_all_agents(self, app_env) -> None:
+        client, *_ = app_env
+        with patch("src.server.start_upgrade", return_value=True) as mock:
+            resp = client.post("/upgrade/retry-hooks")
+        assert resp.status_code == 200
+        assert resp.json()["scope"] == "all"
+        mock.assert_called_once_with(retry_hooks=True, retry_agent=None)
+
+    def test_retry_specific_agent(self, app_env) -> None:
+        client, *_ = app_env
+        with patch("src.server.start_upgrade", return_value=True) as mock:
+            resp = client.post("/upgrade/retry-hooks?agent=cursor")
+        assert resp.status_code == 200
+        assert resp.json()["scope"] == "cursor"
+        mock.assert_called_once_with(retry_hooks=True, retry_agent="cursor")
+
+    def test_retry_hooks_installer_not_found(self, app_env) -> None:
+        client, *_ = app_env
+        with patch("src.server.start_upgrade", return_value=False):
+            resp = client.post("/upgrade/retry-hooks?agent=cursor")
+        assert resp.status_code == 500
+        assert resp.json()["status"] == "error"

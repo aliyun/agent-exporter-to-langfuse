@@ -80,6 +80,49 @@ rm -rf "$TAMPERED_DIR"
 echo ""
 
 # ============================================================
+echo -e "${BOLD}=== E2E-2b: Missing SHA256SUMS fails for file:// with no sums file ===${NC}"
+purge_install
+
+# Create a package dir WITHOUT SHA256SUMS
+NOSUMS_DIR="/tmp/e2e-nosums-$$"
+mkdir -p "$NOSUMS_DIR"
+cp "$TARBALL" "$NOSUMS_DIR/"
+NOSUMS_TARBALL="$(ls "$NOSUMS_DIR"/agent-exporter-to-langfuse-*.tar.gz)"
+
+# file:// without SHA256SUMS should warn but succeed
+OUTPUT=$(LANGFUSE_SECRET_KEY="sk-lf-test" LANGFUSE_PUBLIC_KEY="pk-lf-test" LANGFUSE_BASE_URL="http://127.0.0.1:9999" \
+    bash "$REPO_ROOT/deploy/installer.sh" install \
+    --package-url "file://$NOSUMS_TARBALL" 2>&1 || true)
+
+check "file:// without SHA256SUMS warns" "echo '$OUTPUT' | grep -q 'SHA256SUMS not found next to local package'"
+check "file:// without SHA256SUMS installs" "test -f '$INSTALL_DIR/current'"
+rm -rf "$NOSUMS_DIR"
+purge_install
+echo ""
+
+# ============================================================
+echo -e "${BOLD}=== E2E-2c: --skip-verify bypasses SHA-256 check ===${NC}"
+purge_install
+
+TAMPERED_DIR2="/tmp/e2e-tampered2-$$"
+mkdir -p "$TAMPERED_DIR2"
+cp "$TARBALL" "$TAMPERED_DIR2/"
+cp "$PKG_DIR/SHA256SUMS" "$TAMPERED_DIR2/"
+TAMPERED_TARBALL2="$(ls "$TAMPERED_DIR2"/agent-exporter-to-langfuse-*.tar.gz)"
+# Append garbage to tarball so checksum won't match — but --skip-verify should bypass
+echo "tampered-data" >> "$TAMPERED_TARBALL2"
+
+OUTPUT=$(LANGFUSE_SECRET_KEY="sk-lf-test" LANGFUSE_PUBLIC_KEY="pk-lf-test" LANGFUSE_BASE_URL="http://127.0.0.1:9999" \
+    bash "$REPO_ROOT/deploy/installer.sh" install \
+    --package-url "file://$TAMPERED_TARBALL2" \
+    --version "$VERSION" --skip-verify 2>&1 || true)
+
+check "--skip-verify shows warning" "echo '$OUTPUT' | grep -q 'verification skipped'"
+rm -rf "$TAMPERED_DIR2"
+purge_install
+echo ""
+
+# ============================================================
 echo -e "${BOLD}=== E2E-3: Uninstall without purge ===${NC}"
 
 LANGFUSE_SECRET_KEY="sk-lf-test" LANGFUSE_PUBLIC_KEY="pk-lf-test" LANGFUSE_BASE_URL="http://127.0.0.1:9999" \
@@ -159,13 +202,17 @@ echo ""
 echo -e "${BOLD}=== E2E-7: Rollback ===${NC}"
 purge_install
 
-mkdir -p "$INSTALL_DIR/versions/0.1.0/exporter" "$INSTALL_DIR/versions/0.2.0/exporter"
+mkdir -p "$INSTALL_DIR/versions/0.1.0/exporter/.venv/bin" "$INSTALL_DIR/versions/0.2.0/exporter/.venv/bin"
+printf '#!/bin/sh\nexit 0\n' > "$INSTALL_DIR/versions/0.1.0/exporter/.venv/bin/langstash"
+chmod +x "$INSTALL_DIR/versions/0.1.0/exporter/.venv/bin/langstash"
+printf '#!/bin/sh\nexit 0\n' > "$INSTALL_DIR/versions/0.2.0/exporter/.venv/bin/langstash"
+chmod +x "$INSTALL_DIR/versions/0.2.0/exporter/.venv/bin/langstash"
 echo "0.1.0" > "$INSTALL_DIR/versions/0.1.0/VERSION"
 echo "0.2.0" > "$INSTALL_DIR/versions/0.2.0/VERSION"
 echo "0.2.0" > "$INSTALL_DIR/current"
 echo "0.1.0" > "$INSTALL_DIR/previous"
 
-bash "$REPO_ROOT/deploy/installer.sh" rollback 2>&1 || true
+HEALTH_TIMEOUT=2 bash "$REPO_ROOT/deploy/installer.sh" rollback 2>&1 || true
 
 check "current swapped to 0.1.0" "[ \"\$(cat '$INSTALL_DIR/current')\" = '0.1.0' ]"
 check "previous swapped to 0.2.0" "[ \"\$(cat '$INSTALL_DIR/previous')\" = '0.2.0' ]"

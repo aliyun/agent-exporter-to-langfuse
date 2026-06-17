@@ -13,50 +13,12 @@ logger = logging.getLogger("langstash.hook_state")
 
 HOOK_STATE_FILE = INSTALL_DIR / "hook-state.json"
 
-AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "agents.d"
-
 
 class HookStatus(str, Enum):
     UNDETECTED = "undetected"
     NOT_INSTALLED = "not_installed"
     INSTALLED = "installed"
     ERROR = "error"
-
-
-AGENT_DEFINITIONS: list[dict[str, Any]] = []
-
-
-def _load_agent_definitions() -> list[dict[str, Any]]:
-    global AGENT_DEFINITIONS
-    if AGENT_DEFINITIONS:
-        return AGENT_DEFINITIONS
-
-    defs = []
-    search_paths = [AGENTS_DIR]
-
-    current = _read_current_version()
-    if current:
-        ver_agents = INSTALL_DIR / "versions" / current / "agents.d"
-        if ver_agents.is_dir():
-            search_paths.insert(0, ver_agents)
-
-    for agents_dir in search_paths:
-        if not agents_dir.is_dir():
-            continue
-        for f in sorted(agents_dir.glob("*.json")):
-            try:
-                with open(f) as fh:
-                    defn = json.load(fh)
-                    if defn.get("id") not in [d.get("id") for d in defs]:
-                        defs.append(defn)
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Failed to load agent definition %s: %s", f, e)
-
-    if not defs:
-        defs = _builtin_agent_definitions()
-
-    AGENT_DEFINITIONS = defs
-    return defs
 
 
 def _builtin_agent_definitions() -> list[dict[str, Any]]:
@@ -220,7 +182,7 @@ def _check_hook_markers(defn: dict[str, Any]) -> bool:
 
 def probe_hook_states() -> dict[str, dict[str, Any]]:
     state = load_hook_state()
-    defs = _load_agent_definitions()
+    defs = _builtin_agent_definitions()
 
     for defn in defs:
         agent_id = defn["id"]

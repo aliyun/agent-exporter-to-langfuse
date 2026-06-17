@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from src.config import INSTALL_DIR
+from src.config import INSTALL_DIR, find_installer
 
 logger = logging.getLogger("langstash.updater")
 
@@ -112,31 +112,16 @@ def get_update_info() -> dict[str, Any]:
 UPGRADE_LOG = INSTALL_DIR / "logs" / "upgrade.log"
 
 
-def _find_installer() -> Path | None:
-    candidates = [
-        INSTALL_DIR / "deploy" / "installer.sh",
-    ]
-    current_pointer = INSTALL_DIR / "current"
-    if current_pointer.is_file():
-        ver = current_pointer.read_text().strip()
-        if ver:
-            candidates.insert(0, INSTALL_DIR / "versions" / ver / "deploy" / "installer.sh")
-
-    for p in candidates:
-        if p.is_file():
-            return p
-    # Fallback to legacy upgrade.sh
-    legacy = INSTALL_DIR / "upgrade.sh"
-    return legacy if legacy.is_file() else None
-
-
-def start_upgrade(include_prerelease: bool = False, retry_hooks: bool = False) -> bool:
-    installer = _find_installer()
+def start_upgrade(include_prerelease: bool = False, retry_hooks: bool = False,
+                   retry_agent: str | None = None) -> bool:
+    installer = find_installer()
     if not installer:
         return False
 
     if retry_hooks:
         cmd = ["bash", str(installer), "upgrade", "--retry-hooks"]
+        if retry_agent:
+            cmd.extend(["--agent", retry_agent])
     elif str(installer).endswith("upgrade.sh"):
         cmd = ["bash", str(installer)]
         if include_prerelease:

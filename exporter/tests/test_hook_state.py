@@ -127,7 +127,7 @@ class TestProbeHookStates:
             }
         ]
         (tmp_path / "agent-dir").mkdir()
-        with patch("src.hook_state._load_agent_definitions", return_value=defs):
+        with patch("src.hook_state._builtin_agent_definitions", return_value=defs):
             state = probe_hook_states()
         assert state["test-agent"]["status"] == "not_installed"
 
@@ -139,7 +139,7 @@ class TestProbeHookStates:
                 "hook": {"settingsPath": "", "markers": []},
             }
         ]
-        with patch("src.hook_state._load_agent_definitions", return_value=defs):
+        with patch("src.hook_state._builtin_agent_definitions", return_value=defs):
             state = probe_hook_states()
         assert state["missing-agent"]["status"] == "undetected"
 
@@ -157,7 +157,7 @@ class TestProbeHookStates:
             }
         ]
         save_hook_state({"test-agent": {"version": "0.3.0", "status": "installed"}})
-        with patch("src.hook_state._load_agent_definitions", return_value=defs):
+        with patch("src.hook_state._builtin_agent_definitions", return_value=defs):
             state = probe_hook_states()
         assert state["test-agent"]["status"] == "error"
         assert "overwritten" in state["test-agent"]["error"]
@@ -176,6 +176,6 @@ class TestProbeHookStates:
             }
         ]
         save_hook_state({"test-agent": {"version": "0.3.0", "status": "installed"}})
-        with patch("src.hook_state._load_agent_definitions", return_value=defs):
+        with patch("src.hook_state._builtin_agent_definitions", return_value=defs):
             state = probe_hook_states()
         assert state["test-agent"]["status"] == "installed"

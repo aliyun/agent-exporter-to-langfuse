@@ -18,7 +18,7 @@ INSTALL_DIR="$HOME/.agent-exporter-to-langfuse"
 DEFAULT_REPO="aliyun/agent-exporter-to-langfuse"
 LANGSTASH_WRAPPER="$HOME/.local/bin/langstash"
 HEALTH_URL="http://127.0.0.1:5288/health"
-HEALTH_TIMEOUT=60
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"
 
 # ============================================================
 # Utility functions
@@ -220,7 +220,7 @@ wait_health() {
 # ============================================================
 
 cmd_install() {
-    local version="" package_url=""
+    local version="" package_url="" skip_verify=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -231,6 +231,7 @@ cmd_install() {
             --base-url)    LANGFUSE_BASE_URL="$2"; shift 2 ;;
             --user-id)     LANGFUSE_USER_ID="$2"; shift 2 ;;
             --tags)        LANGFUSE_TAGS="$2"; shift 2 ;;
+            --skip-verify) skip_verify=true; shift ;;
             *) error "install: unknown option: $1"; exit 1 ;;
         esac
     done
@@ -291,11 +292,18 @@ cmd_install() {
     local tarball_file="$tmp_dir/$tarball_basename"
     local sums_file="$tmp_dir/SHA256SUMS"
     download_file "$tarball_url" "$tarball_file"
-    download_file "$sums_url" "$sums_file" 2>/dev/null || warn "SHA256SUMS not available, skipping verification"
 
-    # Verify
-    if [ -f "$sums_file" ]; then
+    # SHA-256 verification: fail-closed for remote URLs, warn for file://
+    if [ "$skip_verify" = true ]; then
+        warn "SHA-256 verification skipped (--skip-verify)"
+    elif download_file "$sums_url" "$sums_file" 2>/dev/null; then
         verify_sha256 "$tarball_file" "$sums_file" "$tarball_basename"
+    elif [[ "$tarball_url" == file://* ]]; then
+        warn "SHA256SUMS not found next to local package, skipping verification"
+    else
+        error "SHA256SUMS download failed — cannot verify package integrity"
+        error "Use --skip-verify to install without integrity verification"
+        exit 1
     fi
 
     # Extract
@@ -451,20 +459,22 @@ open(sys.argv[1], 'w').writelines(out)
 # ============================================================
 
 cmd_upgrade() {
-    local version="" package_url="" retry_hooks=false
+    local version="" package_url="" retry_hooks=false retry_agent="" skip_verify=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --version) version="$2"; shift 2 ;;
             --package-url) package_url="$2"; shift 2 ;;
             --retry-hooks) retry_hooks=true; shift ;;
+            --agent) retry_agent="$2"; shift 2 ;;
+            --skip-verify) skip_verify=true; shift ;;
             *) error "upgrade: unknown option: $1"; exit 1 ;;
         esac
     done
 
     # Retry-hooks mode: just re-run hook upgrades
     if [ "$retry_hooks" = true ]; then
-        retry_failed_hooks
+        retry_failed_hooks "$retry_agent"
         return
     fi
 
@@ -529,10 +539,18 @@ cmd_upgrade() {
     local tarball_file="$tmp_dir/$tarball_basename"
     local sums_file="$tmp_dir/SHA256SUMS"
     download_file "$tarball_url" "$tarball_file"
-    download_file "$sums_url" "$sums_file" 2>/dev/null || warn "SHA256SUMS not available, skipping verification"
 
-    if [ -f "$sums_file" ]; then
+    # SHA-256 verification: fail-closed for remote URLs, warn for file://
+    if [ "$skip_verify" = true ]; then
+        warn "SHA-256 verification skipped (--skip-verify)"
+    elif download_file "$sums_url" "$sums_file" 2>/dev/null; then
         verify_sha256 "$tarball_file" "$sums_file" "$tarball_basename"
+    elif [[ "$tarball_url" == file://* ]]; then
+        warn "SHA256SUMS not found next to local package, skipping verification"
+    else
+        error "SHA256SUMS download failed — cannot verify package integrity"
+        error "Use --skip-verify to upgrade without integrity verification"
+        exit 1
     fi
 
     # Extract
@@ -615,17 +633,20 @@ cmd_rollback() {
         exit 1
     fi
 
+    local ver_dir
+    ver_dir="$(get_version_dir "$previous")"
+    local langstash_bin="$ver_dir/exporter/.venv/bin/langstash"
+
+    if [ ! -x "$langstash_bin" ]; then
+        error "Previous version binary not executable: $langstash_bin"
+        exit 1
+    fi
+
     info "Rolling back: v$current → v$previous"
 
     # Swap pointers
     write_pointer "current" "$previous"
     write_pointer "previous" "$current"
-
-    local ver_dir
-    ver_dir="$(get_version_dir "$previous")"
-
-    # Update service files and restart
-    local langstash_bin="$ver_dir/exporter/.venv/bin/langstash"
     update_service_files "$langstash_bin"
 
     restart_langstash
@@ -712,6 +733,7 @@ upgrade_single_hook() {
 }
 
 retry_failed_hooks() {
+    local target_agent="${1:-}"
     local current
     current="$(read_pointer "current")"
     if [ -z "$current" ]; then
@@ -726,7 +748,22 @@ retry_failed_hooks() {
     fi
 
     local agents_to_retry
-    agents_to_retry="$(python3 -c "
+    if [ -n "$target_agent" ]; then
+        local status
+        status="$(python3 -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print(d.get(sys.argv[2], {}).get('status', ''))
+except: pass
+" "$file" "$target_agent")"
+        if [ "$status" != "error" ]; then
+            info "Agent '$target_agent' has no failed hook to retry"
+            return
+        fi
+        agents_to_retry="$target_agent"
+    else
+        agents_to_retry="$(python3 -c "
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
@@ -735,6 +772,7 @@ try:
             print(k)
 except: pass
 " "$file")"
+    fi
 
     if [ -z "$agents_to_retry" ]; then
         info "No failed hooks to retry"
@@ -920,6 +958,7 @@ Commands:
 Install Options:
   --version VER       Install specific version
   --package-url URL   Use a custom package URL (supports file://)
+  --skip-verify       Skip SHA-256 integrity verification
   --secret-key KEY    Langfuse Secret Key
   --public-key KEY    Langfuse Public Key
   --base-url URL      Langfuse Base URL
@@ -932,7 +971,9 @@ Install Options:
 Upgrade Options:
   --version VER       Upgrade to specific version
   --package-url URL   Use a custom package URL
+  --skip-verify       Skip SHA-256 integrity verification
   --retry-hooks       Retry failed hook upgrades only
+  --agent NAME        With --retry-hooks, retry only this agent's hook
 
 Uninstall Options:
   --purge             Remove config, data, and logs too

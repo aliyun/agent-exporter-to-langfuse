@@ -8,7 +8,7 @@ from pathlib import Path
 import uvicorn
 
 from src.cleaner import Cleaner
-from src.config import INSTALL_DIR, load_config
+from src.config import INSTALL_DIR, find_installer, load_config
 from src.ingestor import FailedRecovery
 from src.sender import Sender
 from src.server import create_app
@@ -42,24 +42,8 @@ def _setup_logging(debug: bool = False) -> logging.Logger:
     return logging.getLogger("langstash")
 
 
-def _find_installer() -> Path | None:
-    candidates = [
-        INSTALL_DIR / "deploy" / "installer.sh",
-    ]
-    current_pointer = INSTALL_DIR / "current"
-    if current_pointer.is_file():
-        ver = current_pointer.read_text().strip()
-        if ver:
-            candidates.insert(0, INSTALL_DIR / "versions" / ver / "deploy" / "installer.sh")
-
-    for p in candidates:
-        if p.is_file():
-            return p
-    return None
-
-
 def _run_installer(subcommand: str, *args: str) -> int:
-    installer = _find_installer()
+    installer = find_installer()
     if not installer:
         print("ERROR: installer.sh not found", file=sys.stderr)
         return 1
