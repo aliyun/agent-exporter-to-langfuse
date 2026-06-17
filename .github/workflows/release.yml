@@ -39,13 +39,19 @@ jobs:
             echo "flag=" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create GitHub Release
+      - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            ${{ steps.prerelease.outputs.flag }} \
-            --title "${{ github.ref_name }}" \
-            --generate-notes \
+          # Create release if it doesn't exist yet (e.g. tag pushed via CLI)
+          if ! gh release view "${{ github.ref_name }}" &>/dev/null; then
+            gh release create "${{ github.ref_name }}" \
+              ${{ steps.prerelease.outputs.flag }} \
+              --title "${{ github.ref_name }}" \
+              --generate-notes
+          fi
+          # Upload (--clobber overwrites if re-run)
+          gh release upload "${{ github.ref_name }}" \
             dist/agent-exporter-to-langfuse-${{ steps.version.outputs.version }}.tar.gz \
-            dist/SHA256SUMS
+            dist/SHA256SUMS \
+            --clobber
