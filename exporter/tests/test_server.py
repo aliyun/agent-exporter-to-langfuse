@@ -131,7 +131,6 @@ class TestGetStats:
         assert data["total_sent"] == 7
         assert data["pending_count"] == 3
         assert "tokens_today" in data
-        assert "tokens_30d" in data
         assert "tokens_history" in data
         assert "storage_used_mb" in data
         assert "uptime_seconds" in data
@@ -151,7 +150,7 @@ class TestGetStats:
         assert data["tokens_today"]["cache_read"] == 50
         assert data["tokens_today"]["cache_creation"] == 30
 
-    def test_tokens_30d_sums_recent_entries(self, app_env) -> None:
+    def test_tokens_history_includes_all_entries(self, app_env) -> None:
         from src.state import FileEntry
         client, _, ingest_state, _ = app_env
         today = datetime.now(timezone.utc)
@@ -159,13 +158,13 @@ class TestGetStats:
             d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
             ingest_state.files[f"{d}.jsonl"] = FileEntry(
                 min_seq=i * 10 + 1, max_seq=i * 10 + 5,
-                input=100, output=50, cache_read=10, cache_creation=5,
+                input=100 if i == 0 else 0,
+                output=50 if i == 0 else 0,
             )
         resp = client.get("/stats")
         data = resp.json()
-        assert data["tokens_30d"]["input"] == 300
-        assert data["tokens_30d"]["output"] == 150
         assert len(data["tokens_history"]) == 3
+        assert "tokens_30d" not in data
 
     def test_handles_error_in_stats(self, app_env) -> None:
         client, _, _, sender_state = app_env

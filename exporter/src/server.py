@@ -88,24 +88,18 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
         }
 
         cutoff = (now - timedelta(days=30)).strftime("%Y-%m-%d")
-        tokens_30d: dict[str, int] = {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0}
         tokens_history: list[dict[str, Any]] = []
         for fname, fe in sorted(ingest_state.files.items()):
             date_part = fname.replace(".jsonl", "")
             if date_part < cutoff:
                 continue
-            tokens_30d["input"] += fe.input
-            tokens_30d["output"] += fe.output
-            tokens_30d["cache_read"] += fe.cache_read
-            tokens_30d["cache_creation"] += fe.cache_creation
-            if fe.input or fe.output or fe.cache_read or fe.cache_creation:
-                tokens_history.append({
-                    "date": date_part,
-                    "input": fe.input,
-                    "output": fe.output,
-                    "cache_read": fe.cache_read,
-                    "cache_creation": fe.cache_creation,
-                })
+            tokens_history.append({
+                "date": date_part,
+                "input": fe.input,
+                "output": fe.output,
+                "cache_read": fe.cache_read,
+                "cache_creation": fe.cache_creation,
+            })
         storage_mb = _dir_size_mb(data_dir)
         update_info = get_update_info() or {}
         result: dict[str, Any] = {
@@ -114,7 +108,6 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
             "pending_count": pending,
             "traces_today": traces_today,
             "tokens_today": tokens_today,
-            "tokens_30d": tokens_30d,
             "tokens_history": tokens_history,
             "last_success_at": sender_state.last_commit_at or None,
             "last_error": None,
