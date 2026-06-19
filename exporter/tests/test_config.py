@@ -124,25 +124,11 @@ class TestSetConfigValue:
         assert cfg.server.port == 1234
 
 
-class TestMaxPayloadBytes:
-    def test_default_value(self, tmp_path: Path) -> None:
+class TestBatchSizeDefault:
+    def test_default_is_1(self, tmp_path: Path) -> None:
         cfg = load_config(tmp_path / "nonexistent.toml")
-        assert cfg.sender.max_payload_bytes == 3_500_000
+        assert cfg.sender.batch_size == 1
 
-    def test_custom_value(self, tmp_path: Path) -> None:
-        toml_file = tmp_path / "config.toml"
-        toml_file.write_text('[sender]\nmax_payload_bytes = 5000000\n')
-        cfg = load_config(toml_file)
-        assert cfg.sender.max_payload_bytes == 5_000_000
-
-    def test_clamps_below_minimum(self, tmp_path: Path) -> None:
-        toml_file = tmp_path / "config.toml"
-        toml_file.write_text('[sender]\nmax_payload_bytes = 50000\n')
-        cfg = load_config(toml_file)
-        assert cfg.sender.max_payload_bytes == 100_000
-
-    def test_clamps_zero(self, tmp_path: Path) -> None:
-        toml_file = tmp_path / "config.toml"
-        toml_file.write_text('[sender]\nmax_payload_bytes = 0\n')
-        cfg = load_config(toml_file)
-        assert cfg.sender.max_payload_bytes == 100_000
+    def test_no_max_payload_bytes(self, tmp_path: Path) -> None:
+        cfg = load_config(tmp_path / "nonexistent.toml")
+        assert not hasattr(cfg.sender, "max_payload_bytes")

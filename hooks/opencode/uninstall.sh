@@ -58,12 +58,18 @@ else
     warn "Config file not found, skipping: $OC_CONFIG_FILE"
 fi
 
-# --- 2. Remove plugin file ---
+# --- 2. Remove plugin file and langstash-deliver ---
 if [ -f "$PLUGIN_FILE" ]; then
     rm -f "$PLUGIN_FILE"
     info "Removed plugin: $PLUGIN_FILE"
 else
     warn "Plugin file not found, skipping: $PLUGIN_FILE"
+fi
+
+DELIVER_DIR="$OC_CONFIG_DIR/plugins/langstash-deliver"
+if [ -d "$DELIVER_DIR" ]; then
+    rm -rf "$DELIVER_DIR"
+    info "Removed langstash-deliver: $DELIVER_DIR"
 fi
 
 # --- 3. Remove env file ---

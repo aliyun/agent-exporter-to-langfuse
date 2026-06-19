@@ -1,5 +1,6 @@
-"""Tests for _build_trace_v2 from langfuse_hook."""
+"""Tests for build_otlp_json from langfuse_hook."""
 
+import json
 from pathlib import Path
 
 import langfuse_hook as hook
@@ -42,59 +43,115 @@ def _tool_use_assistant(tool_id="tu1", tool_name="Bash", tool_input=None,
     }
 
 
-class TestBuildTraceV2Basic:
-    def test_structure_has_required_keys(self):
+def _get_spans(result):
+    return result["resourceSpans"][0]["scopeSpans"][0]["spans"]
+
+
+def _get_attr(span, key):
+    for attr in span.get("attributes", []):
+        if attr["key"] == key:
+            return attr["value"]
+    return None
+
+
+class TestBuildOtlpJsonBasic:
+    def test_structure_has_otlp_format(self):
         turn = Turn(
             user_msg=_user_msg("what is 1+1?"),
             assistant_msgs=[_assistant_msg("2")],
             tool_results_by_id={},
         )
-        result = hook._build_trace_v2(
-            session_id="sess-1",
-            turn_num=1,
-            turn=turn,
+        result = hook.build_otlp_json(
+            session_id="sess-1", turn_num=1, turn=turn,
             transcript_path=Path("/tmp/transcript.jsonl"),
-            user_id="testuser",
-            tags=["claude-code"],
-            is_subagent=False,
+            user_id="testuser", tags=["claude-code"], is_subagent=False,
         )
 
-        assert result["schema_version"] == "2"
-        assert result["source"] == "claude-code"
-        assert result["session_id"] == "sess-1"
-        assert result["user_id"] == "testuser"
-        assert result["tags"] == ["claude-code"]
-        assert "trace" in result
-        assert "generations" in result
-        assert "spans" in result
+        assert "resourceSpans" in result
+        assert len(result["resourceSpans"]) == 1
+        scope_spans = result["resourceSpans"][0]["scopeSpans"]
+        assert len(scope_spans) == 1
+        assert scope_spans[0]["scope"]["name"] == "agent-exporter-to-langfuse"
+        spans = scope_spans[0]["spans"]
+        assert len(spans) >= 1
 
-    def test_trace_name_normal(self):
+    def test_trace_id_is_32_hex(self):
         turn = Turn(
-            user_msg=_user_msg(),
-            assistant_msgs=[_assistant_msg()],
+            user_msg=_user_msg(), assistant_msgs=[_assistant_msg()],
             tool_results_by_id={},
         )
-        result = hook._build_trace_v2(
+        result = hook.build_otlp_json(
+            session_id="s", turn_num=1, turn=turn,
+            transcript_path=Path("/tmp/t.jsonl"),
+            user_id=None, tags=[], is_subagent=False,
+        )
+        spans = _get_spans(result)
+        for span in spans:
+            assert len(span["traceId"]) == 32
+            assert all(c in "0123456789abcdef" for c in span["traceId"])
+
+    def test_span_id_is_16_hex(self):
+        turn = Turn(
+            user_msg=_user_msg(), assistant_msgs=[_assistant_msg()],
+            tool_results_by_id={},
+        )
+        result = hook.build_otlp_json(
+            session_id="s", turn_num=1, turn=turn,
+            transcript_path=Path("/tmp/t.jsonl"),
+            user_id=None, tags=[], is_subagent=False,
+        )
+        spans = _get_spans(result)
+        for span in spans:
+            assert len(span["spanId"]) == 16
+            assert all(c in "0123456789abcdef" for c in span["spanId"])
+
+    def test_root_span_has_trace_name(self):
+        turn = Turn(
+            user_msg=_user_msg(), assistant_msgs=[_assistant_msg()],
+            tool_results_by_id={},
+        )
+        result = hook.build_otlp_json(
             session_id="s", turn_num=3, turn=turn,
             transcript_path=Path("/tmp/t.jsonl"),
             user_id=None, tags=[], is_subagent=False,
         )
-        assert result["trace"]["name"] == "Claude Code - Turn 3"
+        spans = _get_spans(result)
+        root = [s for s in spans if "parentSpanId" not in s]
+        assert len(root) == 1
+        trace_name = _get_attr(root[0], "langfuse.trace.name")
+        assert trace_name["stringValue"] == "Claude Code - Turn 3"
 
-    def test_trace_name_subagent(self):
+    def test_subagent_trace_name(self):
         turn = Turn(
-            user_msg=_user_msg(),
-            assistant_msgs=[_assistant_msg()],
+            user_msg=_user_msg(), assistant_msgs=[_assistant_msg()],
             tool_results_by_id={},
         )
-        result = hook._build_trace_v2(
+        result = hook.build_otlp_json(
             session_id="s", turn_num=2, turn=turn,
             transcript_path=Path("/tmp/t.jsonl"),
             user_id=None, tags=[], is_subagent=True,
         )
-        assert result["trace"]["name"] == "Claude Code - Subagent Turn 2"
+        spans = _get_spans(result)
+        root = [s for s in spans if "parentSpanId" not in s]
+        trace_name = _get_attr(root[0], "langfuse.trace.name")
+        assert trace_name["stringValue"] == "Claude Code - Subagent Turn 2"
 
-    def test_generation_count_matches_assistant_msgs(self):
+    def test_session_id_attribute(self):
+        turn = Turn(
+            user_msg=_user_msg(), assistant_msgs=[_assistant_msg()],
+            tool_results_by_id={},
+        )
+        result = hook.build_otlp_json(
+            session_id="sess-abc", turn_num=1, turn=turn,
+            transcript_path=Path("/tmp/t.jsonl"),
+            user_id=None, tags=[], is_subagent=False,
+        )
+        spans = _get_spans(result)
+        root = [s for s in spans if "parentSpanId" not in s][0]
+        session = _get_attr(root, "session.id")
+        assert session["stringValue"] == "sess-abc"
+
+    def test_generation_spans_count(self):
         turn = Turn(
             user_msg=_user_msg(),
             assistant_msgs=[
@@ -103,90 +160,41 @@ class TestBuildTraceV2Basic:
             ],
             tool_results_by_id={},
         )
-        result = hook._build_trace_v2(
+        result = hook.build_otlp_json(
             session_id="s", turn_num=1, turn=turn,
             transcript_path=Path("/tmp/t.jsonl"),
             user_id=None, tags=[], is_subagent=False,
         )
-        assert len(result["generations"]) == 2
-        assert result["generations"][0]["name"] == "Claude Generation 1"
-        assert result["generations"][1]["name"] == "Claude Generation 2"
+        spans = _get_spans(result)
+        gen_spans = [s for s in spans if _get_attr(s, "langfuse.observation.type") and
+                     _get_attr(s, "langfuse.observation.type").get("stringValue") == "generation"]
+        assert len(gen_spans) == 2
 
 
-class TestBuildTraceV2WithTools:
-    def test_tool_uses_produce_spans(self):
+class TestBuildOtlpJsonWithTools:
+    def test_tool_spans_nested_under_generation(self):
         turn = Turn(
             user_msg=_user_msg(),
-            assistant_msgs=[
-                _tool_use_assistant(tool_id="tu1", tool_name="Bash"),
-            ],
+            assistant_msgs=[_tool_use_assistant(tool_id="tu1", tool_name="Bash")],
             tool_results_by_id={
                 "tu1": {"content": "file1.txt", "timestamp": "2024-01-01T00:00:03Z"},
             },
         )
-        result = hook._build_trace_v2(
+        result = hook.build_otlp_json(
             session_id="s", turn_num=1, turn=turn,
             transcript_path=Path("/tmp/t.jsonl"),
             user_id=None, tags=[], is_subagent=False,
         )
-        assert len(result["spans"]) == 1
-        span = result["spans"][0]
-        assert span["name"] == "Tool: Bash"
-        assert span["generation_index"] == 0
-        assert span["output"] == "file1.txt"
-        assert span["metadata"]["tool_id"] == "tu1"
-
-    def test_generation_output_includes_tool_calls(self):
-        turn = Turn(
-            user_msg=_user_msg(),
-            assistant_msgs=[
-                _tool_use_assistant(tool_id="tu1", tool_name="Read"),
-            ],
-            tool_results_by_id={},
-        )
-        result = hook._build_trace_v2(
-            session_id="s", turn_num=1, turn=turn,
-            transcript_path=Path("/tmp/t.jsonl"),
-            user_id=None, tags=[], is_subagent=False,
-        )
-        gen = result["generations"][0]
-        assert "tool_calls" in gen["output"]
-        assert gen["output"]["tool_calls"][0]["name"] == "Read"
-
-    def test_multiple_tools_in_one_assistant(self):
-        am = {
-            "type": "assistant",
-            "message": {
-                "id": "msg_multi",
-                "role": "assistant",
-                "model": "claude-3.5-sonnet",
-                "content": [
-                    {"type": "tool_use", "id": "tu1", "name": "Bash", "input": {"cmd": "ls"}},
-                    {"type": "tool_use", "id": "tu2", "name": "Read", "input": {"path": "/tmp/x"}},
-                ],
-            },
-            "timestamp": "2024-01-01T00:00:02Z",
-        }
-        turn = Turn(
-            user_msg=_user_msg(),
-            assistant_msgs=[am],
-            tool_results_by_id={
-                "tu1": {"content": "output1", "timestamp": "2024-01-01T00:00:03Z"},
-                "tu2": {"content": "output2", "timestamp": "2024-01-01T00:00:04Z"},
-            },
-        )
-        result = hook._build_trace_v2(
-            session_id="s", turn_num=1, turn=turn,
-            transcript_path=Path("/tmp/t.jsonl"),
-            user_id=None, tags=[], is_subagent=False,
-        )
-        assert len(result["spans"]) == 2
-        assert result["spans"][0]["name"] == "Tool: Bash"
-        assert result["spans"][1]["name"] == "Tool: Read"
+        spans = _get_spans(result)
+        tool_spans = [s for s in spans if _get_attr(s, "langfuse.observation.type") and
+                      _get_attr(s, "langfuse.observation.type").get("stringValue") == "tool"]
+        assert len(tool_spans) == 1
+        assert tool_spans[0]["name"] == "Tool: Bash"
+        assert "parentSpanId" in tool_spans[0]
 
 
-class TestBuildTraceV2WithUsage:
-    def test_usage_included_in_generation(self):
+class TestBuildOtlpJsonWithUsage:
+    def test_usage_in_generation_attributes(self):
         turn = Turn(
             user_msg=_user_msg(),
             assistant_msgs=[
@@ -194,27 +202,49 @@ class TestBuildTraceV2WithUsage:
             ],
             tool_results_by_id={},
         )
-        result = hook._build_trace_v2(
+        result = hook.build_otlp_json(
             session_id="s", turn_num=1, turn=turn,
             transcript_path=Path("/tmp/t.jsonl"),
             user_id=None, tags=[], is_subagent=False,
         )
-        gen = result["generations"][0]
-        assert "usage" in gen
-        assert gen["usage"]["input"] == 100
-        assert gen["usage"]["output"] == 50
+        spans = _get_spans(result)
+        gen_spans = [s for s in spans if _get_attr(s, "langfuse.observation.type") and
+                     _get_attr(s, "langfuse.observation.type").get("stringValue") == "generation"]
+        assert len(gen_spans) == 1
+        usage_attr = _get_attr(gen_spans[0], "langfuse.observation.usage_details")
+        assert usage_attr is not None
+        usage = json.loads(usage_attr["stringValue"])
+        assert usage["input"] == 100
+        assert usage["output"] == 50
 
 
-class TestBuildTraceV2UserIdOptional:
-    def test_no_user_id_key_when_none(self):
+class TestBuildOtlpJsonUserIdOptional:
+    def test_user_id_attribute_when_set(self):
         turn = Turn(
-            user_msg=_user_msg(),
-            assistant_msgs=[_assistant_msg()],
+            user_msg=_user_msg(), assistant_msgs=[_assistant_msg()],
             tool_results_by_id={},
         )
-        result = hook._build_trace_v2(
+        result = hook.build_otlp_json(
+            session_id="s", turn_num=1, turn=turn,
+            transcript_path=Path("/tmp/t.jsonl"),
+            user_id="testuser", tags=[], is_subagent=False,
+        )
+        spans = _get_spans(result)
+        root = [s for s in spans if "parentSpanId" not in s][0]
+        uid = _get_attr(root, "user.id")
+        assert uid["stringValue"] == "testuser"
+
+    def test_no_user_id_attribute_when_none(self):
+        turn = Turn(
+            user_msg=_user_msg(), assistant_msgs=[_assistant_msg()],
+            tool_results_by_id={},
+        )
+        result = hook.build_otlp_json(
             session_id="s", turn_num=1, turn=turn,
             transcript_path=Path("/tmp/t.jsonl"),
             user_id=None, tags=[], is_subagent=False,
         )
-        assert "user_id" not in result
+        spans = _get_spans(result)
+        root = [s for s in spans if "parentSpanId" not in s][0]
+        uid = _get_attr(root, "user.id")
+        assert uid is None

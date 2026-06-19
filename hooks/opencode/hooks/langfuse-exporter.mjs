@@ -1,9 +1,25 @@
-import { Langfuse } from 'langfuse';
 import { readFileSync, mkdirSync, appendFileSync, statSync, renameSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { homedir, userInfo } from 'node:os';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+// Import deliverTrace from the langstash-deliver package.
+// In dev: relative path within the repo. Installed: co-located dist.
+let deliverTrace;
+const __dirname_hook = dirname(fileURLToPath(import.meta.url));
+try {
+  const mod = await import(join(__dirname_hook, '..', '..', 'langstash-deliver', 'typescript', 'dist', 'index.js'));
+  deliverTrace = mod.deliverTrace;
+} catch {
+  try {
+    const mod = await import(join(__dirname_hook, 'langstash-deliver', 'index.js'));
+    deliverTrace = mod.deliverTrace;
+  } catch {
+    // deliverTrace unavailable — will be checked at runtime
+  }
+}
 
 // OpenCode uses Bun runtime which blocks outbound HTTP from plugins.
 // This curl-based fetch bypasses Bun's network restrictions.
@@ -139,40 +155,48 @@ const extractTools = (parts) => {
   return parts.filter(p => p.type === 'tool');
 };
 
-// ----------------- Langstash delivery -----------------
+// ----------------- OTLP JSON builder -----------------
 
-const LANGSTASH_ENABLED = env('LANGSTASH_ENABLED').toLowerCase() === 'true';
-const LANGSTASH_URL = env('LANGSTASH_URL') || 'http://127.0.0.1:5288';
-const LANGSTASH_TIMEOUT = parseInt(env('LANGSTASH_TIMEOUT') || '10', 10) || 10;
-const FAILED_DIR = join(homedir(), '.agent-exporter-to-langfuse', 'data', 'failed');
+const toNanoStr = (date) => String(BigInt(date.getTime()) * 1_000_000n);
 
-const postLangstash = async (traceJson) => {
-  try {
-    const resp = await curlFetch(`${LANGSTASH_URL}/ingest`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(traceJson),
-    });
-    return resp.ok;
-  } catch (e) {
-    await debug(`langstash POST failed: ${e.message}`);
-    return false;
+const buildOtlpJson = (langfuseSessionID, sessionID, turnNum, userText, assistantText, modelName,
+                        tools, usage, userTime, assistantStartTime, assistantEndTime, isSubagent, meta) => {
+  const traceId = randomBytes(16).toString('hex');
+  const rootSpanId = randomBytes(8).toString('hex');
+  const genSpanId = randomBytes(8).toString('hex');
+
+  const traceName = isSubagent
+    ? `OpenCode - Subagent Turn ${turnNum}`
+    : `OpenCode - Turn ${turnNum}`;
+
+  const userId = resolveUserId();
+
+  // Root trace span attributes
+  const rootAttrs = [
+    { key: 'langfuse.trace.name', value: { stringValue: traceName } },
+    { key: 'session.id', value: { stringValue: langfuseSessionID } },
+    { key: 'langfuse.trace.tags', value: { stringValue: JSON.stringify(TAGS) } },
+    { key: 'langfuse.trace.input', value: { stringValue: JSON.stringify({ role: 'user', content: userText }) } },
+    { key: 'langfuse.trace.output', value: { stringValue: JSON.stringify({ role: 'assistant', content: assistantText }) } },
+    { key: 'langfuse.trace.metadata', value: { stringValue: JSON.stringify({
+      source: 'opencode', turn_number: turnNum, is_subagent: isSubagent,
+      sessionId: sessionID, ...meta,
+    }) } },
+  ];
+  if (userId) {
+    rootAttrs.push({ key: 'user.id', value: { stringValue: userId } });
   }
-};
 
-const appendFailedTrace = (traceJson) => {
-  try {
-    mkdirSync(FAILED_DIR, { recursive: true });
-    const today = new Date().toISOString().slice(0, 10);
-    const line = JSON.stringify(traceJson) + '\n';
-    appendFileSync(join(FAILED_DIR, `${today}.jsonl`), line, { flag: 'a' });
-  } catch (e) {
-    writeLogFile('WARN', `appendFailedTrace error: ${e.message}`);
-  }
-};
+  const rootSpan = {
+    traceId,
+    spanId: rootSpanId,
+    name: traceName,
+    startTimeUnixNano: toNanoStr(userTime),
+    endTimeUnixNano: toNanoStr(assistantEndTime),
+    attributes: rootAttrs,
+  };
 
-const buildTraceV2 = (langfuseSessionID, sessionID, turnNum, userText, assistantText, modelName,
-                      tools, usage, userTime, assistantStartTime, assistantEndTime, isSubagent, meta) => {
+  // Generation child span
   const genToolCalls = tools.map(tp => {
     const state = tp.state || {};
     const inputStr = typeof state.input === 'object' ? JSON.stringify(state.input) : String(state.input || '');
@@ -183,10 +207,33 @@ const buildTraceV2 = (langfuseSessionID, sessionID, turnNum, userText, assistant
   if (assistantText) genOutput.content = assistantText;
   if (genToolCalls.length) genOutput.tool_calls = genToolCalls;
 
-  const spans = tools.filter(tp => {
+  const genAttrs = [
+    { key: 'langfuse.observation.type', value: { stringValue: 'generation' } },
+    { key: 'langfuse.observation.name', value: { stringValue: 'Generation' } },
+    { key: 'langfuse.observation.model', value: { stringValue: modelName } },
+    { key: 'langfuse.observation.input', value: { stringValue: JSON.stringify({ role: 'user', content: userText }) } },
+    { key: 'langfuse.observation.output', value: { stringValue: JSON.stringify(genOutput) } },
+    { key: 'langfuse.observation.metadata', value: { stringValue: JSON.stringify(meta) } },
+  ];
+  if (Object.keys(usage).length) {
+    genAttrs.push({ key: 'langfuse.observation.usage_details', value: { stringValue: JSON.stringify(usage) } });
+  }
+
+  const genSpan = {
+    traceId,
+    spanId: genSpanId,
+    parentSpanId: rootSpanId,
+    name: 'Generation',
+    startTimeUnixNano: toNanoStr(assistantStartTime),
+    endTimeUnixNano: toNanoStr(assistantEndTime),
+    attributes: genAttrs,
+  };
+
+  // Tool child spans
+  const toolSpans = tools.filter(tp => {
     const s = tp.state || {};
     return !s.status || s.status === 'completed' || s.status === 'error';
-  }).map((tp, i) => {
+  }).map(tp => {
     const state = tp.state || {};
     const toolInput = state.input || {};
     const inputStr = typeof toolInput === 'object' ? JSON.stringify(toolInput) : String(toolInput);
@@ -194,42 +241,37 @@ const buildTraceV2 = (langfuseSessionID, sessionID, turnNum, userText, assistant
     let toolOutput = state.output || state.error || '';
     if (typeof toolOutput !== 'string') toolOutput = JSON.stringify(toolOutput);
     const [truncOutput] = truncate(toolOutput);
+
+    const toolStart = state.time?.start ? new Date(state.time.start) : assistantStartTime;
+    const toolEnd = state.time?.end ? new Date(state.time.end) : assistantEndTime;
+    const toolSpanId = randomBytes(8).toString('hex');
+
     return {
+      traceId,
+      spanId: toolSpanId,
+      parentSpanId: genSpanId,
       name: `Tool: ${tp.tool || 'unknown'}`,
-      generation_index: 0,
-      start_time: state.time?.start ? new Date(state.time.start).toISOString() : assistantStartTime.toISOString(),
-      end_time: state.time?.end ? new Date(state.time.end).toISOString() : assistantEndTime.toISOString(),
-      input: truncInput, output: truncOutput,
-      metadata: { tool_name: tp.tool, callID: tp.callID, status: state.status },
+      startTimeUnixNano: toNanoStr(toolStart),
+      endTimeUnixNano: toNanoStr(toolEnd),
+      attributes: [
+        { key: 'langfuse.observation.type', value: { stringValue: 'tool' } },
+        { key: 'langfuse.observation.name', value: { stringValue: `Tool: ${tp.tool || 'unknown'}` } },
+        { key: 'langfuse.observation.input', value: { stringValue: truncInput } },
+        { key: 'langfuse.observation.output', value: { stringValue: truncOutput } },
+        { key: 'langfuse.observation.metadata', value: { stringValue: JSON.stringify({
+          tool_name: tp.tool, callID: tp.callID, status: state.status,
+        }) } },
+      ],
     };
   });
 
   return {
-    schema_version: '2',
-    id: randomUUID(),
-    source: 'opencode',
-    session_id: langfuseSessionID,
-    user_id: resolveUserId(),
-    tags: TAGS,
-    trace: {
-      name: isSubagent ? `OpenCode - Subagent Turn ${turnNum}` : `OpenCode - Turn ${turnNum}`,
-      start_time: userTime.toISOString(),
-      end_time: assistantEndTime.toISOString(),
-      input: { role: 'user', content: userText },
-      output: { role: 'assistant', content: assistantText },
-      metadata: { source: 'opencode', turn_number: turnNum, is_subagent: isSubagent,
-                  sessionId: sessionID, ...meta },
-    },
-    generations: [{
-      name: 'Generation', model: modelName,
-      start_time: assistantStartTime.toISOString(),
-      end_time: assistantEndTime.toISOString(),
-      input: { role: 'user', content: userText },
-      output: genOutput,
-      usage: Object.keys(usage).length ? usage : undefined,
-      metadata: meta,
+    resourceSpans: [{
+      scopeSpans: [{
+        scope: { name: 'agent-exporter-to-langfuse' },
+        spans: [rootSpan, genSpan, ...toolSpans],
+      }],
     }],
-    spans,
   };
 };
 
@@ -252,21 +294,15 @@ const _initPlugin = async (ctx) => {
     return {};
   }
 
-  let langfuse;
-  try {
-    langfuse = new Langfuse({ publicKey, secretKey, baseUrl });
-    langfuse.fetch = curlFetch;
-    langfuse.on('error', async (e) => { await warn(`Langfuse SDK error: ${e.message || e}`); });
-    await info('Plugin initialized (curl transport)');
-    await debug(`Langfuse config: host=${baseUrl}, public_key=${publicKey.slice(0, 12)}...`);
-  } catch (e) {
-    await warn(`Langfuse init failed: ${e.message}`);
+  if (!deliverTrace) {
+    await warn('deliverTrace not available (langstash-deliver not found), plugin disabled');
     return {};
   }
 
+  await info('Plugin initialized (OTLP + langstash-deliver)');
+  await debug(`Langfuse config: host=${baseUrl}, public_key=${publicKey.slice(0, 12)}...`);
+
   const client = ctx.client;
-  const directory = ctx.directory;
-  const userId = resolveUserId();
 
   const processedCounts = new Map();
   const sessionModels = new Map();
@@ -360,13 +396,6 @@ const _initPlugin = async (ctx) => {
 
       processedCounts.set(sessionID, allMessages.length);
 
-      try {
-        await langfuse.flushAsync();
-        await debug(`Langfuse flush succeeded`);
-      } catch (e) {
-        await warn(`Langfuse flush failed: ${e.message}`);
-      }
-
       const dur = ((Date.now() - start) / 1000).toFixed(2);
       await info(`Processed ${emitted} turns in ${dur}s (session=${sessionID})`);
     } catch (e) {
@@ -378,11 +407,11 @@ const _initPlugin = async (ctx) => {
 
   const emitTurn = async (langfuseSessionID, sessionID, turnNum, userMsg, userParts, assistantEntries) => {
     const userTextRaw = extractText(userParts);
-    const [userText, userTextMeta] = truncate(userTextRaw);
+    const [userText] = truncate(userTextRaw);
 
     const allAssistantParts = assistantEntries.flatMap(e => e.parts || []);
     const assistantTextRaw = extractText(allAssistantParts);
-    const [assistantText, assistantTextMeta] = truncate(assistantTextRaw);
+    const [assistantText] = truncate(assistantTextRaw);
     const tools = extractTools(allAssistantParts);
 
     const firstAssistant = assistantEntries[0].info;
@@ -411,9 +440,6 @@ const _initPlugin = async (ctx) => {
     const assistantEndTime = lastAssistant.time?.completed ? new Date(lastAssistant.time.completed) : assistantStartTime;
 
     const isSubagent = langfuseSessionID !== sessionID;
-    const traceName = isSubagent
-      ? `OpenCode - Subagent Turn ${turnNum}`
-      : `OpenCode - Turn ${turnNum}`;
 
     if (!assistantText && tools.length === 0) {
       await warn(`turn ${turnNum}: empty output (no text, no tools)`);
@@ -433,114 +459,18 @@ const _initPlugin = async (ctx) => {
     };
     if (aggCost > 0) genMeta.cost = aggCost;
 
-    // --- Langstash delivery (try first) ---
-    if (LANGSTASH_ENABLED) {
-      try {
-        const traceJson = buildTraceV2(langfuseSessionID, sessionID, turnNum, userText, assistantText,
-          modelName, tools, usage, userTime, assistantStartTime, assistantEndTime, isSubagent, genMeta);
-        const ok = await postLangstash(traceJson);
-        if (ok) {
-          await debug(`Delivered turn ${turnNum} via langstash`);
-          return;
-        }
-        await debug(`langstash failed, falling back to direct push`);
-      } catch (e) {
-        await debug(`langstash build/post error: ${e.message}`);
-      }
-    }
-
-    // --- Direct push via Langfuse SDK (fallback) ---
+    // --- Build OTLP JSON and deliver via langstash-deliver ---
     try {
-    // --- Trace ---
-    const trace = langfuse.trace({
-      name: traceName,
-      sessionId: langfuseSessionID,
-      timestamp: userTime,
-      userId,
-      tags: TAGS,
-      input: { role: 'user', content: userText },
-      output: { role: 'assistant', content: assistantText },
-      metadata: {
-        source: 'opencode',
-        sessionId: sessionID,
-        parentSessionId: isSubagent ? langfuseSessionID : undefined,
-        turnNumber: turnNum,
-        directory,
-        userText: userTextMeta,
-        assistantText: assistantTextMeta,
-        assistantMessageCount: assistantEntries.length,
-        toolCount: tools.length,
-      },
-    });
-
-    // --- Generation ---
-    const genToolCalls = tools.map(tp => {
-      const state = tp.state || {};
-      const inputStr = typeof state.input === 'object' ? JSON.stringify(state.input) : String(state.input || '');
-      const [truncInput] = truncate(inputStr);
-      return { id: tp.callID, name: tp.tool, input: truncInput };
-    });
-
-    const genOutput = { role: 'assistant' };
-    if (assistantText) genOutput.content = assistantText;
-    if (genToolCalls.length) genOutput.tool_calls = genToolCalls;
-
-    const genParams = {
-      name: 'Generation',
-      model: modelName,
-      startTime: assistantStartTime,
-      endTime: assistantEndTime,
-      input: { role: 'user', content: userText },
-      output: genOutput,
-      metadata: genMeta,
-    };
-    if (Object.keys(usage).length) genParams.usage = usage;
-
-    const generation = trace.generation(genParams);
-
-    // --- Tool spans ---
-    for (const tp of tools) {
-      const state = tp.state || {};
-      if (state.status && state.status !== 'completed' && state.status !== 'error') continue;
-
-      const toolInput = state.input || {};
-      const inputStr = typeof toolInput === 'object' ? JSON.stringify(toolInput) : String(toolInput);
-      const [truncInput, inputMeta] = truncate(inputStr);
-
-      let toolOutput = state.output || state.error || '';
-      if (typeof toolOutput !== 'string') toolOutput = JSON.stringify(toolOutput);
-      const [truncOutput, outputMeta] = truncate(toolOutput);
-
-      const toolStart = state.time?.start ? new Date(state.time.start) : assistantStartTime;
-      const toolEnd = state.time?.end ? new Date(state.time.end) : assistantEndTime;
-
-      generation.span({
-        name: `Tool: ${tp.tool || 'unknown'}`,
-        startTime: toolStart,
-        endTime: toolEnd,
-        input: truncInput,
-        output: truncOutput,
-        metadata: {
-          toolName: tp.tool,
-          callID: tp.callID,
-          status: state.status,
-          title: state.title,
-          inputMeta,
-          outputMeta,
-        },
-      });
-    }
-
-    await debug(`Emitted turn ${turnNum}: model=${modelName} tools=${tools.length} tokens=${JSON.stringify(usage)}${isSubagent ? ' (subagent)' : ''}`);
-    } catch (sdkErr) {
-      await warn(`direct push failed: ${sdkErr.message}, saving to failed log`);
-      try {
-        const traceJson = buildTraceV2(langfuseSessionID, sessionID, turnNum, userText, assistantText,
-          modelName, tools, usage, userTime, assistantStartTime, assistantEndTime, isSubagent, genMeta);
-        appendFailedTrace(traceJson);
-      } catch (e2) {
-        await warn(`failed log write error: ${e2.message}`);
+      const otlpJson = buildOtlpJson(langfuseSessionID, sessionID, turnNum, userText, assistantText,
+        modelName, tools, usage, userTime, assistantStartTime, assistantEndTime, isSubagent, genMeta);
+      const ok = await deliverTrace(otlpJson, { fetchFn: curlFetch });
+      if (ok) {
+        await debug(`Delivered turn ${turnNum}: model=${modelName} tools=${tools.length} tokens=${JSON.stringify(usage)}${isSubagent ? ' (subagent)' : ''}`);
+      } else {
+        await warn(`deliverTrace returned false for turn ${turnNum} (saved to failed log)`);
       }
+    } catch (e) {
+      await warn(`deliverTrace error for turn ${turnNum}: ${e.message}`);
     }
   };
 

@@ -56,7 +56,7 @@ retention_days = 30
 [sender]
 interval_seconds = 5
 max_backoff_seconds = 300
-batch_size = 10
+batch_size = 1
 timeout_seconds = 30
 EOF
     info "Created $CONFIG_FILE"
@@ -87,6 +87,7 @@ if [ "$(uname)" = "Darwin" ]; then
     <key>ProgramArguments</key>
     <array>
         <string>${LANGSTASH_BIN}</string>
+        <string>run</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

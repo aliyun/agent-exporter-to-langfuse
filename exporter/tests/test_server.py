@@ -43,22 +43,18 @@ def app_env(tmp_path: Path):
 
 def _valid_trace():
     return {
-        "schema_version": "1",
-        "source": "test",
-        "session_id": "s1",
-        "trace": {
-            "name": "t",
-            "start_time": "2024-01-01T00:00:00Z",
-            "end_time": "2024-01-01T00:00:01Z",
-        },
-        "generations": [
-            {
-                "name": "g1",
-                "model": "gpt-4",
-                "start_time": "2024-01-01T00:00:00Z",
-                "end_time": "2024-01-01T00:00:01Z",
-            },
-        ],
+        "resourceSpans": [{
+            "scopeSpans": [{
+                "scope": {"name": "agent-exporter-to-langfuse"},
+                "spans": [{
+                    "traceId": "a" * 32,
+                    "spanId": "b" * 16,
+                    "name": "test",
+                    "startTimeUnixNano": "1718000000000000000",
+                    "endTimeUnixNano": "1718000001000000000",
+                }],
+            }],
+        }],
     }
 
 

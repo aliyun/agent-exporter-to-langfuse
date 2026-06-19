@@ -72,6 +72,14 @@ find "$STAGE_TARGET" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null |
 find "$STAGE_TARGET" -type d -name ".venv" -exec rm -rf {} + 2>/dev/null || true
 find "$STAGE_TARGET" -name "*.pyc" -delete 2>/dev/null || true
 
+# Pre-build TS langstash-deliver so dist/ is available for codex and opencode hooks
+TS_DELIVER="$STAGE_TARGET/hooks/langstash-deliver/typescript"
+if [ -f "$TS_DELIVER/tsconfig.json" ]; then
+    echo "Building TS langstash-deliver ..."
+    (cd "$TS_DELIVER" && npm install --ignore-scripts 2>/dev/null && npx tsc 2>/dev/null) || true
+    rm -rf "$TS_DELIVER/node_modules"
+fi
+
 mkdir -p "$OUTPUT_DIR"
 
 (cd "$STAGING_DIR" && tar czf "$TARBALL_NAME" "agent-exporter-to-langfuse-${VERSION}")

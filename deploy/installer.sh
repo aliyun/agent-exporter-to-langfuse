@@ -890,7 +890,7 @@ path = sys.argv[1]
 new_bin = sys.argv[2]
 with open(path, 'rb') as f:
     pl = plistlib.load(f)
-pl['ProgramArguments'] = [new_bin]
+pl['ProgramArguments'] = [new_bin, 'run']
 with open(path, 'wb') as f:
     plistlib.dump(pl, f)
 " "$plist" "$langstash_bin" 2>/dev/null || true

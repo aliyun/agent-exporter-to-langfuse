@@ -1,6 +1,7 @@
 import fcntl
 import json
 import logging
+import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,9 +13,10 @@ logger = logging.getLogger("langstash.ingestor")
 
 MAX_BODY_BYTES = 10 * 1024 * 1024
 
-REQUIRED_FIELDS_TRACE = ("name", "start_time", "end_time")
-
 RECOVER_INTERVAL = 60
+
+_HEX_32_RE = re.compile(r"^[0-9a-f]{32}$")
+_HEX_16_RE = re.compile(r"^[0-9a-f]{16}$")
 
 
 class IngestError(Exception):
@@ -24,24 +26,69 @@ class IngestError(Exception):
         super().__init__(message)
 
 
-def validate_trace(body: dict[str, Any]) -> None:
-    if not body.get("schema_version"):
-        raise IngestError(422, "missing required field: schema_version")
-    if not body.get("source"):
-        raise IngestError(422, "missing required field: source")
-    if not body.get("session_id"):
-        raise IngestError(422, "missing required field: session_id")
+def validate_otlp(body: dict[str, Any]) -> None:
+    resource_spans = body.get("resourceSpans")
+    if not isinstance(resource_spans, list) or len(resource_spans) == 0:
+        raise IngestError(422, "missing or empty resourceSpans")
 
-    trace = body.get("trace")
-    if not isinstance(trace, dict):
-        raise IngestError(422, "missing required field: trace")
-    for f in REQUIRED_FIELDS_TRACE:
-        if not trace.get(f):
-            raise IngestError(422, f"missing required field: trace.{f}")
+    has_root = False
 
-    generations = body.get("generations")
-    if not isinstance(generations, list) or len(generations) == 0:
-        raise IngestError(422, "generations must be a non-empty array")
+    for rs_idx, rs in enumerate(resource_spans):
+        scope_spans = rs.get("scopeSpans")
+        if not isinstance(scope_spans, list):
+            raise IngestError(422, f"resourceSpans[{rs_idx}]: missing scopeSpans")
+
+        for ss_idx, ss in enumerate(scope_spans):
+            spans = ss.get("spans")
+            if not isinstance(spans, list) or len(spans) == 0:
+                raise IngestError(422, f"resourceSpans[{rs_idx}].scopeSpans[{ss_idx}]: missing or empty spans")
+
+            for sp_idx, span in enumerate(spans):
+                prefix = f"resourceSpans[{rs_idx}].scopeSpans[{ss_idx}].spans[{sp_idx}]"
+
+                trace_id = span.get("traceId", "")
+                if not isinstance(trace_id, str) or not _HEX_32_RE.match(trace_id):
+                    raise IngestError(422, f"{prefix}: traceId must be 32-char hex string")
+
+                span_id = span.get("spanId", "")
+                if not isinstance(span_id, str) or not _HEX_16_RE.match(span_id):
+                    raise IngestError(422, f"{prefix}: spanId must be 16-char hex string")
+
+                name = span.get("name")
+                if not isinstance(name, str) or not name:
+                    raise IngestError(422, f"{prefix}: name must be non-empty string")
+
+                start_ns = span.get("startTimeUnixNano")
+                if not isinstance(start_ns, str) or not start_ns:
+                    raise IngestError(422, f"{prefix}: startTimeUnixNano must be non-empty string")
+                try:
+                    start_val = int(start_ns)
+                except (ValueError, TypeError):
+                    raise IngestError(422, f"{prefix}: startTimeUnixNano is not a valid nanosecond timestamp")
+
+                end_ns = span.get("endTimeUnixNano")
+                if end_ns is not None and end_ns != "":
+                    try:
+                        end_val = int(end_ns)
+                    except (ValueError, TypeError):
+                        raise IngestError(422, f"{prefix}: endTimeUnixNano is not a valid nanosecond timestamp")
+                    if end_val < start_val:
+                        raise IngestError(422, f"{prefix}: endTimeUnixNano < startTimeUnixNano")
+
+                parent_span_id = span.get("parentSpanId", "")
+                if not parent_span_id:
+                    has_root = True
+
+                attributes = span.get("attributes")
+                if attributes is not None:
+                    if not isinstance(attributes, list):
+                        raise IngestError(422, f"{prefix}: attributes must be a KeyValue array")
+                    for attr in attributes:
+                        if not isinstance(attr, dict) or "key" not in attr or "value" not in attr:
+                            raise IngestError(422, f"{prefix}: each attribute must have key and value")
+
+    if not has_root:
+        raise IngestError(422, "no root span found (all spans have parentSpanId)")
 
 
 def _accumulate_tokens(state: IngestState, body: dict[str, Any], today: str) -> None:
@@ -51,17 +98,31 @@ def _accumulate_tokens(state: IngestState, body: dict[str, Any], today: str) -> 
         state.tokens_output = 0
         state.tokens_cache_read = 0
         state.tokens_cache_creation = 0
-    for gen in body.get("generations", []):
-        usage = gen.get("usage")
-        if isinstance(usage, dict):
-            state.tokens_input += int(usage.get("input", 0))
-            state.tokens_output += int(usage.get("output", 0))
-            state.tokens_cache_read += int(usage.get("cache_read_input_tokens", 0))
-            state.tokens_cache_creation += int(usage.get("cache_creation_input_tokens", 0))
+
+    for rs in body.get("resourceSpans", []):
+        for ss in rs.get("scopeSpans", []):
+            for span in ss.get("spans", []):
+                for attr in span.get("attributes", []):
+                    if attr.get("key") != "langfuse.observation.usage_details":
+                        continue
+                    value = attr.get("value", {})
+                    raw = value.get("stringValue", "")
+                    if not raw:
+                        continue
+                    try:
+                        usage = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if not isinstance(usage, dict):
+                        continue
+                    state.tokens_input += int(usage.get("input", 0))
+                    state.tokens_output += int(usage.get("output", 0))
+                    state.tokens_cache_read += int(usage.get("cache_read_input_tokens", 0))
+                    state.tokens_cache_creation += int(usage.get("cache_creation_input_tokens", 0))
 
 
 def ingest(body: dict[str, Any], state: IngestState, data_dir: Path, state_path: Path) -> int:
-    validate_trace(body)
+    validate_otlp(body)
 
     seq_id = allocate_seq_id(state)
     now = datetime.now(timezone.utc)
@@ -113,6 +174,8 @@ def recover_failed(data_dir: Path, state: IngestState, state_path: Path) -> int:
                 try:
                     body = json.loads(line)
                 except json.JSONDecodeError:
+                    logger.warning("recover skip (%s): JSONDecodeError", fpath.name)
+                    ok = False
                     continue
                 try:
                     ingest(body, state, data_dir, state_path)

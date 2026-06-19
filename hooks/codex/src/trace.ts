@@ -2,14 +2,24 @@ import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import { propagateAttributes, startObservation, type LangfuseObservation } from "@langfuse/tracing";
+import { context, trace, TraceFlags } from "@opentelemetry/api";
+import type { SpanContext } from "@opentelemetry/api";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
+
+import { deliverTrace } from "../../langstash-deliver/typescript/dist/index.js";
 
 import type { Config } from "./config.js";
-import { appendFailedTrace, buildTraceV2, postLangstash } from "./langstash.js";
 import { parseSession } from "./parse.js";
 import { loadUploadedTurnIds, markTurnUploaded } from "./sidecar.js";
-import type { ModelStep, RolloutLine, SessionMeta, TokenUsage, ToolCall, Turn } from "./types.js";
+import type { ModelStep, RolloutLine, SessionMeta, TokenUsage, Turn } from "./types.js";
 import { debugLog, error, info, warn, toText, truncate } from "./utils.js";
+
+const SCOPE_NAME = "agent-exporter-to-langfuse";
 
 async function loadSession(file: string): Promise<RolloutLine[]> {
   const data = await fs.readFile(file, "utf-8");
@@ -100,79 +110,196 @@ function buildGenerationOutput(step: ModelStep, clip: Clip): Record<string, unkn
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
-async function emitTurnOtel(
+/* ------------------------------------------------------------------ */
+/*  OTLP JSON serialization helpers                                    */
+/* ------------------------------------------------------------------ */
+
+type OtlpAttribute = {
+  key: string;
+  value:
+    | { stringValue: string }
+    | { intValue: string }
+    | { boolValue: boolean }
+    | { doubleValue: number };
+};
+
+type OtlpSpan = {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  name: string;
+  startTimeUnixNano: string;
+  endTimeUnixNano: string;
+  attributes: OtlpAttribute[];
+};
+
+function readableSpanToOtlp(span: ReadableSpan): OtlpSpan {
+  const ctx = span.spanContext();
+  const attrs: OtlpAttribute[] = [];
+  for (const [key, value] of Object.entries(span.attributes)) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string") {
+      attrs.push({ key, value: { stringValue: value } });
+    } else if (typeof value === "number") {
+      if (Number.isInteger(value)) {
+        attrs.push({ key, value: { intValue: String(value) } });
+      } else {
+        attrs.push({ key, value: { doubleValue: value } });
+      }
+    } else if (typeof value === "boolean") {
+      attrs.push({ key, value: { boolValue: value } });
+    }
+  }
+
+  const parentId = span.parentSpanContext?.spanId;
+  return {
+    traceId: ctx.traceId,
+    spanId: ctx.spanId,
+    ...(parentId ? { parentSpanId: parentId } : {}),
+    name: span.name,
+    startTimeUnixNano: hrTimeToNanos(span.startTime),
+    endTimeUnixNano: hrTimeToNanos(span.endTime),
+    attributes: attrs,
+  };
+}
+
+function hrTimeToNanos(hrTime: [number, number]): string {
+  return String(BigInt(hrTime[0]) * 1_000_000_000n + BigInt(hrTime[1]));
+}
+
+/* ------------------------------------------------------------------ */
+/*  Parent span context for subagent nesting                           */
+/* ------------------------------------------------------------------ */
+
+export type ParentSpanContext = {
+  traceId: string;
+  spanId: string;
+};
+
+/* ------------------------------------------------------------------ */
+/*  buildOtlpJson                                                      */
+/* ------------------------------------------------------------------ */
+
+export function buildOtlpJson(
   turn: Turn,
   sessionMeta: SessionMeta,
-  ctx: {
-    config: Config;
-    rolloutFile: string;
-    traceName: string;
-    parentObservation?: LangfuseObservation;
-  },
-): Promise<void> {
-  const clip = makeClip(ctx.config.max_chars);
+  config: Config,
+  traceName: string,
+  parentContext?: ParentSpanContext,
+): Record<string, unknown> {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  const tracer = provider.getTracer(SCOPE_NAME);
+  const clip = makeClip(config.max_chars);
 
-  const root = startObservation(
-    ctx.traceName,
-    {
-      input: turn.userInput != null ? clip(turn.userInput) : undefined,
-      output: turn.finalOutput != null ? clip(turn.finalOutput) : undefined,
-      level: turn.aborted ? "WARNING" : undefined,
-      statusMessage: turn.aborted ? "Turn interrupted by user" : undefined,
-      metadata: {
-        "codex.turn_id": turn.turnId,
-        "codex.thread_id": sessionMeta.threadId,
-        "codex.model": turn.model,
-        "codex.model_provider": sessionMeta.modelProvider,
-        "codex.cli_version": sessionMeta.cliVersion,
-        "codex.aborted": turn.aborted,
-        "codex.tool_call_count": turn.steps.reduce((n, s) => n + s.toolCalls.length, 0),
-        ...(sessionMeta.isSubagent
-          ? {
-              "codex.is_subagent": true,
-              "codex.parent_thread_id": sessionMeta.parentThreadId,
-              "codex.agent_nickname": sessionMeta.agentNickname,
-            }
-          : {}),
-      },
-    },
-    {
-      asType: "agent",
-      startTime: new Date(turn.startTime),
-      parentSpanContext: ctx.parentObservation?.otelSpan.spanContext(),
-    },
+  // If we have a parent context, create a synthetic parent span context
+  // so the root span inherits the parent's traceId.
+  let rootCtx = context.active();
+  if (parentContext) {
+    const parentSpanContext: SpanContext = {
+      traceId: parentContext.traceId,
+      spanId: parentContext.spanId,
+      traceFlags: TraceFlags.SAMPLED,
+    };
+    rootCtx = trace.setSpanContext(rootCtx, parentSpanContext);
+  }
+
+  // --- Root span ---
+  const rootSpan = tracer.startSpan(
+    traceName,
+    { startTime: new Date(turn.startTime) },
+    rootCtx,
   );
 
+  // Set root attributes
+  rootSpan.setAttribute("langfuse.trace.name", traceName);
+  rootSpan.setAttribute("session.id", sessionMeta.sessionId);
+  if (config.user_id) {
+    rootSpan.setAttribute("user.id", config.user_id);
+  }
+  if (config.tags && config.tags.length > 0) {
+    rootSpan.setAttribute("langfuse.trace.tags", JSON.stringify(config.tags));
+  }
+  if (turn.userInput != null) {
+    rootSpan.setAttribute(
+      "langfuse.observation.input",
+      JSON.stringify({ role: "user", content: clip(turn.userInput) }),
+    );
+  }
+  if (turn.finalOutput != null) {
+    rootSpan.setAttribute(
+      "langfuse.observation.output",
+      JSON.stringify({ role: "assistant", content: clip(turn.finalOutput) }),
+    );
+  }
+  rootSpan.end(new Date(turn.endTime));
+
+  // Create a context with the root span as parent for generation spans
+  const rootParentCtx = trace.setSpan(context.active(), rootSpan);
+
+  // --- Generation and tool spans ---
   let previousToolResults: unknown = undefined;
 
   for (let i = 0; i < turn.steps.length; i++) {
     const step = turn.steps[i];
-    const generation = startObservation(
+
+    const genSpan = tracer.startSpan(
       turn.model ?? "codex.generation",
-      {
-        input:
-          i === 0
-            ? turn.userInput != null
-              ? clip(turn.userInput)
-              : undefined
-            : previousToolResults,
-        output: buildGenerationOutput(step, clip),
-        model: turn.model,
-        usageDetails: toUsageDetails(step.usage),
-        metadata: { "codex.step_index": i },
-      },
-      {
-        asType: "generation",
-        startTime: new Date(step.startTime),
-        parentSpanContext: root.otelSpan.spanContext(),
-      },
+      { startTime: new Date(step.startTime) },
+      rootParentCtx,
     );
 
-    for (const tc of step.toolCalls) {
-      emitToolCall(tc, generation, clip, step.endTime);
+    genSpan.setAttribute("langfuse.observation.type", "generation");
+    if (turn.model) {
+      genSpan.setAttribute("langfuse.observation.model.name", turn.model);
     }
 
-    generation.end(new Date(step.endTime));
+    const usageDetails = toUsageDetails(step.usage);
+    if (usageDetails) {
+      genSpan.setAttribute("langfuse.observation.usage_details", JSON.stringify(usageDetails));
+    }
+
+    const genInput =
+      i === 0
+        ? turn.userInput != null
+          ? clip(turn.userInput)
+          : undefined
+        : previousToolResults;
+
+    if (genInput != null) {
+      genSpan.setAttribute("langfuse.observation.input", JSON.stringify(genInput));
+    }
+
+    const genOutput = buildGenerationOutput(step, clip);
+    if (genOutput) {
+      genSpan.setAttribute("langfuse.observation.output", JSON.stringify(genOutput));
+    }
+
+    genSpan.end(new Date(step.endTime));
+
+    // Create a context with the generation span as parent for tool spans
+    const genParentCtx = trace.setSpan(context.active(), genSpan);
+
+    // --- Tool call spans under this generation ---
+    for (const tc of step.toolCalls) {
+      const toolSpan = tracer.startSpan(
+        tc.name || "tool",
+        { startTime: new Date(tc.startTime) },
+        genParentCtx,
+      );
+
+      toolSpan.setAttribute("langfuse.observation.type", "tool");
+      if (tc.args != null) {
+        toolSpan.setAttribute("langfuse.observation.input", JSON.stringify(tc.args));
+      }
+      if (tc.output != null) {
+        toolSpan.setAttribute("langfuse.observation.output", JSON.stringify(clip(toText(tc.output))));
+      }
+
+      toolSpan.end(new Date(tc.endTime ?? step.endTime));
+    }
 
     previousToolResults =
       step.toolCalls.length > 0
@@ -184,61 +311,79 @@ async function emitTurnOtel(
         : undefined;
   }
 
-  for (const threadId of turn.subagentThreadIds) {
-    const subFile = await findSubagentRollout(ctx.rolloutFile, threadId);
-    if (!subFile) {
-      warn(`subagent rollout not found for thread ${threadId}`);
-      continue;
-    }
-    await convertRollout(subFile, { config: ctx.config, parentObservation: root });
-  }
+  // Force flush and collect spans
+  provider.forceFlush();
 
-  root.end(new Date(turn.endTime));
+  const finishedSpans = exporter.getFinishedSpans();
+
+  // Serialize to OTLP JSON
+  const otlpSpans: OtlpSpan[] = finishedSpans.map(readableSpanToOtlp);
+
+  provider.shutdown();
+
+  return {
+    resourceSpans: [
+      {
+        scopeSpans: [
+          {
+            scope: { name: SCOPE_NAME },
+            spans: otlpSpans,
+          },
+        ],
+      },
+    ],
+  };
 }
 
-function emitToolCall(
-  tc: ToolCall,
-  parent: LangfuseObservation,
-  clip: Clip,
-  fallbackEnd: number,
-): void {
-  const tool = startObservation(
-    tc.name || "tool",
-    {
-      input: tc.args,
-      output: tc.output != null ? clip(toText(tc.output)) : undefined,
-      level: tc.error ? "ERROR" : undefined,
-      statusMessage: tc.error ? clip(tc.error) : undefined,
-      metadata: { "codex.call_id": tc.callId },
-    },
-    {
-      asType: "tool",
-      startTime: new Date(tc.startTime),
-      parentSpanContext: parent.otelSpan.spanContext(),
-    },
-  );
-  tool.end(new Date(tc.endTime ?? fallbackEnd));
-}
+/* ------------------------------------------------------------------ */
+/*  convertRollout — entry point                                       */
+/* ------------------------------------------------------------------ */
 
 export async function convertRollout(
   rolloutFile: string,
-  options: { config: Config; parentObservation?: LangfuseObservation },
+  options: { config: Config; parentContext?: ParentSpanContext },
 ): Promise<void> {
   const { sessionMeta, turns } = parseSession(await loadSession(rolloutFile));
   info(`parsed ${turns.length} turn(s) from ${path.basename(rolloutFile)}`);
 
-  if (options.parentObservation) {
+  if (options.parentContext) {
+    // Subagent: emit all turns under the parent span, do not deduplicate
     for (let i = 0; i < turns.length; i++) {
-      await emitTurnOtel(turns[i], sessionMeta, {
-        config: options.config,
-        rolloutFile,
-        traceName: `Codex - Subagent Turn ${i + 1}`,
-        parentObservation: options.parentObservation,
-      });
+      const turn = turns[i];
+      const traceName = `Codex - Subagent Turn ${i + 1}`;
+      const otlpJson = buildOtlpJson(turn, sessionMeta, options.config, traceName, options.parentContext);
+
+      // Recurse into sub-subagents
+      for (const threadId of turn.subagentThreadIds) {
+        const subFile = await findSubagentRollout(rolloutFile, threadId);
+        if (!subFile) {
+          warn(`subagent rollout not found for thread ${threadId}`);
+          continue;
+        }
+        // For nested subagents, use the root span of this turn as parent.
+        // Extract root spanId from the built OTLP (first span is root).
+        const spans = (
+          (otlpJson.resourceSpans as Array<{ scopeSpans: Array<{ spans: OtlpSpan[] }> }>)[0]
+            .scopeSpans[0].spans
+        );
+        const rootSpan = spans.find((s) => s.parentSpanId === options.parentContext!.spanId) ?? spans[0];
+        await convertRollout(subFile, {
+          config: options.config,
+          parentContext: { traceId: rootSpan.traceId, spanId: rootSpan.spanId },
+        });
+      }
+
+      const delivered = await deliverTrace(otlpJson);
+      if (delivered) {
+        info(`delivered subagent turn ${i + 1} via langstash-deliver`);
+      } else {
+        warn(`failed to deliver subagent turn ${i + 1}`);
+      }
     }
     return;
   }
 
+  // Top-level: deduplicate by turn id
   const uploaded = await loadUploadedTurnIds(rolloutFile);
 
   for (let i = 0; i < turns.length; i++) {
@@ -251,56 +396,32 @@ export async function convertRollout(
     }
 
     const traceName = `Codex - Turn ${i + 1}`;
-    let delivered = false;
+    const otlpJson = buildOtlpJson(turn, sessionMeta, options.config, traceName);
 
-    // Tier 1: langstash
-    if (options.config.langstash_enabled) {
-      try {
-        const traceJson = buildTraceV2(turn, sessionMeta, options.config, traceName);
-        delivered = await postLangstash(traceJson, options.config);
-        if (delivered) {
-          info(`delivered turn ${effectiveId} via langstash`);
-        } else {
-          warn("langstash delivery failed, falling back to OTel");
-        }
-      } catch (e) {
-        error("langstash build/post error:", e);
+    // Handle subagent recursion: use this turn's root span as parent
+    for (const threadId of turn.subagentThreadIds) {
+      const subFile = await findSubagentRollout(rolloutFile, threadId);
+      if (!subFile) {
+        warn(`subagent rollout not found for thread ${threadId}`);
+        continue;
       }
+      const spans = (
+        (otlpJson.resourceSpans as Array<{ scopeSpans: Array<{ spans: OtlpSpan[] }> }>)[0]
+          .scopeSpans[0].spans
+      );
+      // Root span is the one without parentSpanId (top-level turn)
+      const rootSpan = spans.find((s) => !s.parentSpanId) ?? spans[0];
+      await convertRollout(subFile, {
+        config: options.config,
+        parentContext: { traceId: rootSpan.traceId, spanId: rootSpan.spanId },
+      });
     }
 
-    // Tier 2: OTel direct push
-    if (!delivered) {
-      try {
-        await propagateAttributes(
-          {
-            sessionId: sessionMeta.sessionId,
-            traceName,
-            ...(options.config.user_id ? { userId: options.config.user_id } : {}),
-            ...(options.config.tags ? { tags: options.config.tags } : {}),
-          },
-          async () => {
-            await emitTurnOtel(turn, sessionMeta, {
-              config: options.config,
-              rolloutFile,
-              traceName,
-            });
-          },
-        );
-        delivered = true;
-      } catch (e) {
-        error("OTel direct push failed:", e);
-      }
-    }
-
-    // Tier 3: failed log
-    if (!delivered) {
-      try {
-        const traceJson = buildTraceV2(turn, sessionMeta, options.config, traceName);
-        appendFailedTrace(traceJson);
-        warn("trace saved to failed log");
-      } catch (e) {
-        error("failed log write error:", e);
-      }
+    const delivered = await deliverTrace(otlpJson);
+    if (delivered) {
+      info(`delivered turn ${effectiveId} via langstash-deliver`);
+    } else {
+      warn(`failed to deliver turn ${effectiveId}`);
     }
 
     uploaded.add(effectiveId);

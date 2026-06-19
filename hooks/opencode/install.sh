@@ -28,6 +28,7 @@ LANGFUSE_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}"
 LANGFUSE_BASE_URL="${LANGFUSE_BASE_URL:-}"
 LANGFUSE_USER_ID="${LANGFUSE_USER_ID:-}"
 LANGFUSE_TAGS="${LANGFUSE_TAGS:-}"
+AUTO_YES=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --base-url)    LANGFUSE_BASE_URL="$2"; shift 2 ;;
         --user-id)     LANGFUSE_USER_ID="$2"; shift 2 ;;
         --tags)        LANGFUSE_TAGS="$2"; shift 2 ;;
+        -y|--yes|--upgrade) AUTO_YES=true; shift ;;
         *) shift ;;
     esac
 done
@@ -125,25 +127,37 @@ fi
 
 echo ""
 
-# --- 3. Install langfuse npm package ---
-info "Installing langfuse npm package in $OC_CONFIG_DIR ..."
-(cd "$OC_CONFIG_DIR" && npm install langfuse --save 2>&1 | tail -1)
-info "langfuse npm package installed."
-
-# --- 4. Copy plugin file ---
+# --- 3. Copy plugin file and langstash-deliver ---
 mkdir -p "$OC_PLUGINS_DIR"
+DELIVER_SRC="$SCRIPT_DIR/../langstash-deliver/typescript/dist"
+DELIVER_DEST="$OC_PLUGINS_DIR/langstash-deliver"
+
 if [ -f "$PLUGIN_DEST" ]; then
-    warn "Plugin already exists at $PLUGIN_DEST"
-    read -rp "Overwrite? [y/N] " answer
-    if [[ ! "$answer" =~ ^[Yy]$ ]]; then
-        info "Skipped plugin copy."
-    else
+    if [ "$AUTO_YES" = true ]; then
         cp "$SOURCE_PLUGIN" "$PLUGIN_DEST"
         info "Plugin updated."
+    else
+        warn "Plugin already exists at $PLUGIN_DEST"
+        read -rp "Overwrite? [y/N] " answer
+        if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+            info "Skipped plugin copy."
+        else
+            cp "$SOURCE_PLUGIN" "$PLUGIN_DEST"
+            info "Plugin updated."
+        fi
     fi
 else
     cp "$SOURCE_PLUGIN" "$PLUGIN_DEST"
     info "Plugin installed to $PLUGIN_DEST"
+fi
+
+if [ -d "$DELIVER_SRC" ]; then
+    mkdir -p "$DELIVER_DEST"
+    cp "$DELIVER_SRC"/index.js "$DELIVER_DEST/" 2>/dev/null || true
+    cp "$DELIVER_SRC"/index.d.ts "$DELIVER_DEST/" 2>/dev/null || true
+    info "langstash-deliver installed to $DELIVER_DEST"
+else
+    warn "langstash-deliver dist not found at $DELIVER_SRC, skipping"
 fi
 
 # --- 5. Register plugin in opencode.json ---

@@ -15,6 +15,7 @@
 - 如果更新了部署、安装、运行逻辑，必须同步修改 `README.md` 等用户指导文件，保持文档与实际行为一致。
 - 修改代码逻辑后，必须通过相关的单元测试和 E2E 测试。如果现有测试不覆盖改动，需要补充测试。
 - 如果代码结构发生变化（新增/移除/重命名模块、包、文件），必须检查并适配 `deploy/package.sh`、`deploy/installer.sh`、各 hook 的 `install.sh` / `uninstall.sh`、`pyproject.toml` / `package.json` 等打包和安装脚本，确保构建产物、文件拷贝路径、依赖声明与新结构一致。
+- Hooks 会被拷贝到各 agent 的工作目录下（如 `~/.codex/hooks/langfuse/`、`~/.config/opencode/plugins/`）。hooks 依赖的共享包（如 `langstash-deliver`）必须通过 `install.sh` 一并拷贝到对应 agent 目录，或在打包构建时内联到 bundle 产物中（如 codex 的 `tsdown` 已内联）。
 
 ## 架构约束
 

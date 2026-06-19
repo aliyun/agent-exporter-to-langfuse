@@ -52,9 +52,8 @@ class StorageConfig:
 class SenderConfig:
     interval_seconds: int = 5
     max_backoff_seconds: int = 300
-    batch_size: int = 10
+    batch_size: int = 1
     timeout_seconds: int = 30
-    max_payload_bytes: int = 3_500_000
 
 
 @dataclass
@@ -99,13 +98,6 @@ def load_config(path: Path | None = None) -> Config:
         for k, v in raw["sender"].items():
             if hasattr(cfg.sender, k):
                 setattr(cfg.sender, k, v)
-
-    if cfg.sender.max_payload_bytes < 100_000:
-        logger.warning(
-            "max_payload_bytes=%d is below minimum, clamping to 100000",
-            cfg.sender.max_payload_bytes,
-        )
-        cfg.sender.max_payload_bytes = 100_000
 
     if "update" in raw:
         for k, v in raw["update"].items():

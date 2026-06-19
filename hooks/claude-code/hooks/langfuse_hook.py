@@ -17,18 +17,19 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# --- Delivery layer (langstash → direct push → failed log) ---
+# --- Delivery layer (langstash → Langfuse OTel → failed log) ---
 try:
     from langstash_deliver.deliver import deliver_trace
-    from langstash_deliver.schema import build_trace_json, build_generation, build_span, Usage
     _HAS_DELIVER = True
 except ImportError:
     _HAS_DELIVER = False
 
-# --- Langfuse import (fail-open) ---
+# --- OTel SDK for building OTLP JSON ---
 try:
-    from langfuse import Langfuse, propagate_attributes
-    from opentelemetry import trace as otel_trace_api
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry import trace as otel_trace_api, context as otel_context_api
 except Exception:
     sys.exit(0)
 
@@ -480,245 +481,86 @@ def build_turns(messages: List[Dict[str, Any]]) -> List[Turn]:
     flush_turn()
     return turns
 
-# ----------------- Langfuse emit -----------------
+from typing import TypedDict
+
+class Usage(TypedDict, total=False):
+    input: int
+    output: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+
+
+# ----------------- OTLP JSON builder -----------------
+
+SCOPE_NAME = "agent-exporter-to-langfuse"
+
+
 def _to_ns(ts: Optional[datetime]) -> Optional[int]:
-    """Convert a datetime to OTel-style nanoseconds since epoch."""
     if ts is None:
         return None
     return int(ts.timestamp() * 1_000_000_000)
 
 
-def _start_backdated(langfuse: Langfuse, *, name: str, as_type: str,
-                     start_time: Optional[datetime],
-                     parent_otel_span: Any = None,
-                     **obs_kwargs: Any) -> Any:
-    """Create a Langfuse observation with an explicit OTel start_time.
-
-    Bypasses langfuse.start_observation() (which has no start_time kwarg in
-    SDK 4.x) by talking to the underlying OTel tracer directly and then
-    wrapping the resulting span with the Langfuse observation type.
-
-    Depends on SDK 4.x internals: langfuse._otel_tracer and
-    langfuse._create_observation_from_otel_span. If a future SDK version
-    renames or removes these, raise a clear error instead of letting an
-    AttributeError get swallowed by the broad emit_turn handler.
-    """
-    if not hasattr(langfuse, "_otel_tracer") or not hasattr(langfuse, "_create_observation_from_otel_span"):
-        try:
-            sdk_version = getattr(__import__("langfuse"), "__version__", "unknown")
-        except Exception:
-            sdk_version = "unknown"
-        raise RuntimeError(
-            f"Langfuse SDK {sdk_version} is missing _otel_tracer or "
-            f"_create_observation_from_otel_span. This hook targets SDK 4.x; "
-            f"pin with `pip install \"langfuse>=4.0,<5\"` or update the hook script."
-        )
-    start_ns = _to_ns(start_time)
-    if parent_otel_span is not None:
-        with otel_trace_api.use_span(parent_otel_span, end_on_exit=False):
-            otel_span = langfuse._otel_tracer.start_span(name=name, start_time=start_ns)
-    else:
-        otel_span = langfuse._otel_tracer.start_span(name=name, start_time=start_ns)
-    return langfuse._create_observation_from_otel_span(
-        otel_span=otel_span,
-        as_type=as_type,
-        **obs_kwargs,
-    )
+def _make_attr(key: str, value: Any) -> Dict[str, Any]:
+    if isinstance(value, str):
+        return {"key": key, "value": {"stringValue": value}}
+    if isinstance(value, bool):
+        return {"key": key, "value": {"boolValue": value}}
+    if isinstance(value, int):
+        return {"key": key, "value": {"intValue": str(value)}}
+    if isinstance(value, float):
+        return {"key": key, "value": {"doubleValue": value}}
+    return {"key": key, "value": {"stringValue": json.dumps(value, ensure_ascii=False)}}
 
 
-def emit_turn(langfuse: Langfuse, session_id: str, turn_num: int, turn: Turn, transcript_path: Path, user_id: Optional[str] = None, tags: Optional[List[str]] = None, is_subagent: bool = False) -> None:
-    user_text_raw = extract_text(get_content(turn.user_msg))
-    user_text, user_text_meta = truncate_text(user_text_raw)
+def _spans_to_otlp_json(exporter: InMemorySpanExporter) -> Dict[str, Any]:
+    spans_data = []
+    for span in exporter.get_finished_spans():
+        ctx = span.get_span_context()
+        trace_id = format(ctx.trace_id, "032x")
+        span_id = format(ctx.span_id, "016x")
+        parent_id = ""
+        if span.parent is not None:
+            parent_id = format(span.parent.span_id, "016x")
 
-    last_assistant = turn.assistant_msgs[-1]
-    final_assistant_text, _ = truncate_text(extract_text(get_content(last_assistant)))
+        attributes = []
+        if span.attributes:
+            for k, v in span.attributes.items():
+                attributes.append(_make_attr(k, v))
 
-    user_ts = parse_ts(turn.user_msg)
-    last_assistant_ts = parse_ts(last_assistant)
-    # Pick a turn end_time: latest among final assistant message or any tool result
-    candidate_end_ts = [t for t in [last_assistant_ts] if t is not None]
-    for tr in turn.tool_results_by_id.values():
-        t = parse_ts(tr)
-        if t is not None:
-            candidate_end_ts.append(t)
-    turn_end_ts = max(candidate_end_ts) if candidate_end_ts else None
+        span_dict: Dict[str, Any] = {
+            "traceId": trace_id,
+            "spanId": span_id,
+            "name": span.name,
+            "startTimeUnixNano": str(span.start_time),
+            "endTimeUnixNano": str(span.end_time or span.start_time),
+        }
+        if parent_id:
+            span_dict["parentSpanId"] = parent_id
+        if attributes:
+            span_dict["attributes"] = attributes
 
-    trace_label = f"Claude Code - Subagent Turn {turn_num}" if is_subagent else f"Claude Code - Turn {turn_num}"
+        spans_data.append(span_dict)
 
-    pa_kwargs: Dict[str, Any] = {
-        "session_id": session_id,
-        "trace_name": trace_label,
-        "tags": tags or ["claude-code"],
+    return {
+        "resourceSpans": [{
+            "scopeSpans": [{
+                "scope": {"name": SCOPE_NAME},
+                "spans": spans_data,
+            }],
+        }],
     }
-    if user_id:
-        pa_kwargs["user_id"] = user_id
 
-    with propagate_attributes(**pa_kwargs):
-        trace_span = _start_backdated(
-            langfuse,
-            name=trace_label,
-            as_type="span",
-            start_time=user_ts,
-            input={"role": "user", "content": user_text},
-            metadata={
-                "source": "claude-code",
-                "session_id": session_id,
-                "turn_number": turn_num,
-                "transcript_path": str(transcript_path),
-                "user_text": user_text_meta,
-                "assistant_message_count": len(turn.assistant_msgs),
-            },
-        )
-        parent_otel_span = trace_span._otel_span
 
-        # Iterate each assistant message: emit generation, then its tool_use children.
-        # prev_ts = the moment the next generation could have started (= when the previous
-        # batch of tool results all returned, or the original user message timestamp).
-        prev_ts = user_ts
-        prev_tool_results: List[Dict[str, Any]] = []  # populated after each batch, surfaced as next gen's input
+def build_otlp_json(session_id: str, turn_num: int, turn: Turn, transcript_path: Path,
+                     user_id: Optional[str], tags: List[str], is_subagent: bool) -> Dict[str, Any]:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider(resource=Resource.create({}))
+    provider.add_span_processor(
+        __import__("opentelemetry.sdk.trace.export", fromlist=["SimpleSpanProcessor"]).SimpleSpanProcessor(exporter)
+    )
+    tracer = provider.get_tracer(SCOPE_NAME)
 
-        for idx, am in enumerate(turn.assistant_msgs):
-            am_ts = parse_ts(am)
-            am_text_raw = extract_text(get_content(am))
-            am_text, am_text_meta = truncate_text(am_text_raw)
-            model = get_model(am)
-            tool_uses = iter_tool_uses(get_content(am))
-
-            # Build generation input: user message for first generation, otherwise tool results from
-            # the prior batch (best partial reconstruction of the prompt context).
-            if idx == 0:
-                gen_input: Any = {"role": "user", "content": user_text}
-            elif prev_tool_results:
-                gen_input = {"role": "tool", "tool_results": prev_tool_results}
-            else:
-                gen_input = None
-
-            # Build generation output: include both the text response and any tool calls the LLM
-            # decided to make. Most assistant messages in tool-using turns are tool-call-only, so
-            # without tool_calls in the output, the observation looks empty.
-            gen_tool_calls = []
-            for tu in tool_uses:
-                tu_input = tu.get("input")
-                if isinstance(tu_input, str):
-                    tu_input_serialized, _ = truncate_text(tu_input)
-                else:
-                    tu_input_serialized = tu_input
-                gen_tool_calls.append({
-                    "id": tu.get("id"),
-                    "name": tu.get("name"),
-                    "input": tu_input_serialized,
-                })
-
-            gen_output: Dict[str, Any] = {"role": "assistant"}
-            if am_text:
-                gen_output["content"] = am_text
-            if gen_tool_calls:
-                gen_output["tool_calls"] = gen_tool_calls
-
-            gen_kwargs: Dict[str, Any] = dict(
-                model=model,
-                input=gen_input,
-                output=gen_output,
-                metadata={
-                    "assistant_index": idx,
-                    "assistant_text": am_text_meta,
-                    "tool_count": len(tool_uses),
-                },
-            )
-            usage_details = get_usage(am)
-            if usage_details is not None:
-                gen_kwargs["usage_details"] = usage_details
-
-            gen_span = _start_backdated(
-                langfuse,
-                name=f"Claude Generation {idx + 1}",
-                as_type="generation",
-                start_time=prev_ts or am_ts,
-                parent_otel_span=parent_otel_span,
-                **gen_kwargs,
-            )
-
-            # Tool observations: nested under this generation. Each starts when the assistant
-            # emitted the tool_use (am_ts) and ends when its tool_result row arrived.
-            batch_result_ts: List[datetime] = []
-            batch_tool_results: List[Dict[str, Any]] = []
-            for tu in tool_uses:
-                tid = str(tu.get("id") or "")
-                tname = tu.get("name") or "unknown"
-                tinput_raw = tu.get("input") if isinstance(tu.get("input"), (dict, list, str, int, float, bool)) else {}
-                if isinstance(tinput_raw, str):
-                    tinput, tinput_meta = truncate_text(tinput_raw)
-                else:
-                    tinput, tinput_meta = tinput_raw, None
-
-                tr_entry = turn.tool_results_by_id.get(tid) if tid else None
-                if tr_entry:
-                    out_raw = tr_entry.get("content")
-                    out_str = out_raw if isinstance(out_raw, str) else json.dumps(out_raw, ensure_ascii=False)
-                    out_trunc, out_meta = truncate_text(out_str)
-                    tr_ts = parse_ts(tr_entry.get("timestamp"))
-                else:
-                    out_trunc, out_meta, tr_ts = None, None, None
-                if tr_ts is not None:
-                    batch_result_ts.append(tr_ts)
-
-                tool_span = _start_backdated(
-                    langfuse,
-                    name=f"Tool: {tname}",
-                    as_type="tool",
-                    start_time=am_ts,
-                    parent_otel_span=gen_span._otel_span,
-                    input=tinput,
-                    metadata={
-                        "tool_name": tname,
-                        "tool_id": tid,
-                        "input_meta": tinput_meta,
-                        "output_meta": out_meta,
-                    },
-                )
-                tool_span.update(output=out_trunc)
-                tool_span.end(end_time=_to_ns(tr_ts or am_ts))
-
-                batch_tool_results.append({
-                    "tool_use_id": tid,
-                    "tool_name": tname,
-                    "output": out_trunc,
-                })
-
-            # End the generation AFTER its tools so the timeline cleanly contains them.
-            # If there were tool calls, gen ends with the last result; otherwise at am_ts.
-            gen_end_ts = max(batch_result_ts) if batch_result_ts else am_ts
-            gen_span.end(end_time=_to_ns(gen_end_ts or am_ts or prev_ts))
-
-            # Carry this batch's results into the next generation's input.
-            prev_tool_results = batch_tool_results
-
-            # Advance prev_ts: next generation can only start after this batch's tool results returned.
-            if batch_result_ts:
-                prev_ts = max(batch_result_ts)
-            elif am_ts is not None:
-                prev_ts = am_ts
-
-        trace_span.update(output={"role": "assistant", "content": final_assistant_text})
-        trace_span.end(end_time=_to_ns(turn_end_ts or last_assistant_ts or user_ts))
-
-def resolve_user_id() -> Optional[str]:
-    uid = _opt("LANGFUSE_USER_ID")
-    if uid:
-        return uid
-    for k in ("USER", "LOGNAME", "USERNAME"):
-        v = os.environ.get(k)
-        if v:
-            return v
-    try:
-        import getpass
-        return getpass.getuser()
-    except Exception:
-        return None
-
-# ----------------- Trace Schema v2 builder -----------------
-def _build_trace_v2(session_id: str, turn_num: int, turn: Turn, transcript_path: Path,
-                    user_id: Optional[str], tags: List[str], is_subagent: bool) -> Dict[str, Any]:
     user_text_raw = extract_text(get_content(turn.user_msg))
     user_text, _ = truncate_text(user_text_raw)
     last_assistant = turn.assistant_msgs[-1]
@@ -735,10 +577,24 @@ def _build_trace_v2(session_id: str, turn_num: int, turn: Turn, transcript_path:
 
     trace_label = f"Claude Code - Subagent Turn {turn_num}" if is_subagent else f"Claude Code - Turn {turn_num}"
 
-    generations: List[Dict[str, Any]] = []
-    spans: List[Dict[str, Any]] = []
-    prev_ts = user_ts
+    root_start_ns = _to_ns(user_ts) or _to_ns(datetime.now(timezone.utc))
+    root_end_ns = _to_ns(turn_end or last_ts or user_ts) or root_start_ns
 
+    root_attrs = {
+        "langfuse.trace.name": trace_label,
+        "session.id": session_id,
+        "langfuse.observation.input": json.dumps({"role": "user", "content": user_text}, ensure_ascii=False),
+        "langfuse.observation.output": json.dumps({"role": "assistant", "content": final_text}, ensure_ascii=False),
+    }
+    if user_id:
+        root_attrs["user.id"] = user_id
+    if tags:
+        root_attrs["langfuse.trace.tags"] = json.dumps(tags)
+
+    root_span = tracer.start_span(name=trace_label, start_time=root_start_ns, attributes=root_attrs)
+    root_ctx = otel_trace_api.set_span_in_context(root_span)
+
+    prev_ts = user_ts
     for idx, am in enumerate(turn.assistant_msgs):
         am_ts = parse_ts(am)
         am_text, _ = truncate_text(extract_text(get_content(am)))
@@ -764,13 +620,22 @@ def _build_trace_v2(session_id: str, turn_num: int, turn: Turn, transcript_path:
             gen_output["tool_calls"] = gen_tool_calls
 
         usage = get_usage(am)
-        gen = build_generation(
-            name=f"Claude Generation {idx + 1}", model=model,
-            start_time=prev_ts or am_ts, end_time=am_ts,
-            gen_input=gen_input, gen_output=gen_output,
-            usage=usage, metadata={"assistant_index": idx, "tool_count": len(tool_uses)},
+
+        gen_attrs: Dict[str, Any] = {
+            "langfuse.observation.type": "generation",
+            "langfuse.observation.model.name": model,
+            "langfuse.observation.input": json.dumps(gen_input, ensure_ascii=False) if gen_input else "",
+            "langfuse.observation.output": json.dumps(gen_output, ensure_ascii=False),
+        }
+        if usage:
+            gen_attrs["langfuse.observation.usage_details"] = json.dumps(usage, ensure_ascii=False)
+
+        gen_start_ns = _to_ns(prev_ts or am_ts) or root_start_ns
+        gen_span = tracer.start_span(
+            name=f"Claude Generation {idx + 1}", start_time=gen_start_ns,
+            attributes=gen_attrs, context=root_ctx,
         )
-        generations.append(gen)
+        gen_ctx = otel_trace_api.set_span_in_context(gen_span)
 
         batch_end: List[datetime] = []
         for tu in tool_uses:
@@ -790,41 +655,59 @@ def _build_trace_v2(session_id: str, turn_num: int, turn: Turn, transcript_path:
                 tr_ts = parse_ts(tr_entry.get("timestamp"))
             if tr_ts:
                 batch_end.append(tr_ts)
-            spans.append(build_span(
-                name=f"Tool: {tname}", generation_index=idx,
-                start_time=am_ts, end_time=tr_ts or am_ts,
-                span_input=tinput, span_output=out_trunc,
-                metadata={"tool_name": tname, "tool_id": tid},
-            ))
+
+            tool_attrs: Dict[str, Any] = {
+                "langfuse.observation.type": "tool",
+                "langfuse.observation.input": json.dumps(tinput, ensure_ascii=False) if tinput else "",
+                "langfuse.observation.metadata.tool_name": tname,
+                "langfuse.observation.metadata.tool_id": tid,
+            }
+            if out_trunc:
+                tool_attrs["langfuse.observation.output"] = out_trunc
+
+            tool_start_ns = _to_ns(am_ts) or gen_start_ns
+            tool_end_ns = _to_ns(tr_ts or am_ts) or tool_start_ns
+            tool_span = tracer.start_span(
+                name=f"Tool: {tname}", start_time=tool_start_ns,
+                attributes=tool_attrs, context=gen_ctx,
+            )
+            tool_span.end(end_time=tool_end_ns)
+
+        gen_end_ts = max(batch_end) if batch_end else am_ts
+        gen_span.end(end_time=_to_ns(gen_end_ts or am_ts or prev_ts) or gen_start_ns)
 
         if batch_end:
             prev_ts = max(batch_end)
         elif am_ts:
             prev_ts = am_ts
 
-    return build_trace_json(
-        source="claude-code", session_id=session_id, user_id=user_id, tags=tags,
-        trace_name=trace_label, start_time=user_ts, end_time=turn_end,
-        user_input={"role": "user", "content": user_text},
-        assistant_output={"role": "assistant", "content": final_text},
-        metadata={
-            "source": "claude-code", "turn_number": turn_num,
-            "is_subagent": is_subagent, "assistant_message_count": len(turn.assistant_msgs),
-            "transcript_path": str(transcript_path),
-        },
-        generations=generations, spans=spans,
-    )
+    root_span.end(end_time=root_end_ns)
+    provider.shutdown()
+
+    return _spans_to_otlp_json(exporter)
+
+
+def resolve_user_id() -> Optional[str]:
+    uid = _opt("LANGFUSE_USER_ID")
+    if uid:
+        return uid
+    for k in ("USER", "LOGNAME", "USERNAME"):
+        v = os.environ.get(k)
+        if v:
+            return v
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:
+        return None
 
 # ----------------- Main -----------------
 def main() -> int:
     start = time.time()
     debug("Hook started")
 
-    public_key = _opt("LANGFUSE_PUBLIC_KEY")
-    secret_key = _opt("LANGFUSE_SECRET_KEY")
-    host = _opt("LANGFUSE_BASE_URL") or "https://us.cloud.langfuse.com"
-
-    if not public_key or not secret_key:
+    if not _HAS_DELIVER:
+        debug("langstash_deliver not available; exiting.")
         return 0
 
     payload = read_hook_payload()
@@ -845,12 +728,6 @@ def main() -> int:
     tags_raw = _opt("LANGFUSE_TAGS") or "claude-code"
     tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
 
-    langfuse = None
-    try:
-        langfuse = Langfuse(public_key=public_key, secret_key=secret_key, host=host)
-    except Exception:
-        return 0
-
     try:
         with FileLock(LOCK_FILE):
             state = load_state()
@@ -869,34 +746,17 @@ def main() -> int:
                 save_state(state)
                 return 0
 
-            # emit turns
             emitted = 0
             for t in turns:
                 emitted += 1
                 turn_num = ss.turn_count + emitted
 
-                if _HAS_DELIVER:
-                    try:
-                        trace_json = _build_trace_v2(session_id, turn_num, t, transcript_path,
-                                                     user_id=user_id, tags=tags, is_subagent=is_subagent)
-                    except Exception as e:
-                        debug(f"_build_trace_v2 failed: {e}")
-                        trace_json = None
-
-                    def _direct_push(_tj, _t=t, _turn_num=turn_num):
-                        emit_turn(langfuse, session_id, _turn_num, _t, transcript_path,
-                                  user_id=user_id, tags=tags, is_subagent=is_subagent)
-                        return True
-
-                    if trace_json:
-                        deliver_trace(trace_json, direct_push_fn=_direct_push)
-                    else:
-                        _direct_push(None)
-                else:
-                    try:
-                        emit_turn(langfuse, session_id, turn_num, t, transcript_path, user_id=user_id, tags=tags, is_subagent=is_subagent)
-                    except Exception as e:
-                        info(f"emit_turn failed: {type(e).__name__}: {e}")
+                try:
+                    otlp_json = build_otlp_json(session_id, turn_num, t, transcript_path,
+                                                user_id=user_id, tags=tags, is_subagent=is_subagent)
+                    deliver_trace(otlp_json)
+                except Exception as e:
+                    debug(f"build/deliver failed: {e}")
 
             ss.turn_count += emitted
             write_session_state(state, key, ss)
@@ -913,22 +773,6 @@ def main() -> int:
     except Exception as e:
         debug(f"Unexpected failure: {e}")
         return 0
-
-    finally:
-        # Cap flush+shutdown at 5s so a slow/unreachable Langfuse can't stall Claude Code.
-        if langfuse is not None:
-            try:
-                def _flush_and_shutdown():
-                    try:
-                        langfuse.flush()
-                    except Exception:
-                        pass
-                    langfuse.shutdown()
-                t = threading.Thread(target=_flush_and_shutdown, daemon=True)
-                t.start()
-                t.join(5.0)
-            except Exception:
-                pass
 
 if __name__ == "__main__":
     sys.exit(main())
