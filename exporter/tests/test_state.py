@@ -27,37 +27,71 @@ class TestIngestStatePersistence:
         path = tmp_path / "ingest.json"
         state = IngestState(
             next_seq_id=42,
-            files={"2024-01-01.jsonl": FileEntry(min_seq=1, max_seq=10)},
-            tokens_date="2024-01-01",
-            tokens_input=100,
-            tokens_output=200,
-            tokens_cache_read=30,
-            tokens_cache_creation=15,
+            files={"2024-01-01.jsonl": FileEntry(
+                min_seq=1, max_seq=10,
+                input=100, output=200, cache_read=30, cache_creation=15,
+            )},
         )
         save_ingest_state(path, state)
         loaded = load_ingest_state(path)
 
         assert loaded.next_seq_id == 42
         assert "2024-01-01.jsonl" in loaded.files
-        assert loaded.files["2024-01-01.jsonl"].min_seq == 1
-        assert loaded.files["2024-01-01.jsonl"].max_seq == 10
-        assert loaded.tokens_date == "2024-01-01"
-        assert loaded.tokens_input == 100
-        assert loaded.tokens_output == 200
-        assert loaded.tokens_cache_read == 30
-        assert loaded.tokens_cache_creation == 15
+        fe = loaded.files["2024-01-01.jsonl"]
+        assert fe.min_seq == 1
+        assert fe.max_seq == 10
+        assert fe.input == 100
+        assert fe.output == 200
+        assert fe.cache_read == 30
+        assert fe.cache_creation == 15
 
     def test_missing_file_returns_default(self, tmp_path: Path) -> None:
         state = load_ingest_state(tmp_path / "missing.json")
         assert state.next_seq_id == 1
         assert state.files == {}
-        assert state.tokens_input == 0
 
     def test_corrupt_file_returns_default(self, tmp_path: Path) -> None:
         path = tmp_path / "corrupt.json"
         path.write_text("not valid json {{{")
         state = load_ingest_state(path)
         assert state.next_seq_id == 1
+
+    def test_backward_compat_tokens_today(self, tmp_path: Path) -> None:
+        """Old format with tokens_today should migrate into file entry."""
+        path = tmp_path / "ingest.json"
+        path.write_text(json.dumps({
+            "next_seq_id": 5,
+            "files": {"2024-01-01.jsonl": {"min_seq": 1, "max_seq": 4}},
+            "tokens_today": {
+                "date": "2024-01-01",
+                "input": 500, "output": 100,
+                "cache_read": 50, "cache_creation": 25,
+            },
+        }))
+        loaded = load_ingest_state(path)
+        fe = loaded.files["2024-01-01.jsonl"]
+        assert fe.input == 500
+        assert fe.output == 100
+        assert fe.cache_read == 50
+        assert fe.cache_creation == 25
+
+    def test_backward_compat_tokens_today_no_file_entry(self, tmp_path: Path) -> None:
+        """Old tokens_today with no matching file entry creates one."""
+        path = tmp_path / "ingest.json"
+        path.write_text(json.dumps({
+            "next_seq_id": 1,
+            "files": {},
+            "tokens_today": {
+                "date": "2024-02-01",
+                "input": 200, "output": 50,
+                "cache_read": 10, "cache_creation": 5,
+            },
+        }))
+        loaded = load_ingest_state(path)
+        assert "2024-02-01.jsonl" in loaded.files
+        fe = loaded.files["2024-02-01.jsonl"]
+        assert fe.input == 200
+        assert fe.min_seq == 0
 
 
 class TestSenderStatePersistence:

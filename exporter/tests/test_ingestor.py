@@ -151,37 +151,61 @@ class TestValidateOtlp:
 
 class TestAccumulateTokens:
     def test_accumulates_from_span_attributes(self) -> None:
-        state = IngestState(tokens_date="2024-01-01")
+        from src.state import FileEntry
+        state = IngestState(files={"2024-01-01.jsonl": FileEntry(min_seq=1, max_seq=1)})
         body = _valid_otlp()
         body["resourceSpans"][0]["scopeSpans"][0]["spans"].append(
             _span_with_usage(input_tokens=100, output_tokens=50, cache_read=10)
         )
-        _accumulate_tokens(state, body, "2024-01-01")
-        assert state.tokens_input == 100
-        assert state.tokens_output == 50
-        assert state.tokens_cache_read == 10
+        _accumulate_tokens(state, body, "2024-01-01.jsonl")
+        fe = state.files["2024-01-01.jsonl"]
+        assert fe.input == 100
+        assert fe.output == 50
+        assert fe.cache_read == 10
 
-    def test_resets_on_new_day(self) -> None:
-        state = IngestState(
-            tokens_date="2024-01-01",
-            tokens_input=999, tokens_output=999,
-            tokens_cache_read=999, tokens_cache_creation=999,
-        )
+    def test_accumulates_across_calls(self) -> None:
+        from src.state import FileEntry
+        state = IngestState(files={
+            "2024-01-01.jsonl": FileEntry(min_seq=1, max_seq=1, input=100, output=50),
+        })
         body = _valid_otlp()
         body["resourceSpans"][0]["scopeSpans"][0]["spans"].append(
             _span_with_usage(input_tokens=10, output_tokens=5)
         )
-        _accumulate_tokens(state, body, "2024-01-02")
-        assert state.tokens_date == "2024-01-02"
-        assert state.tokens_input == 10
-        assert state.tokens_output == 5
-        assert state.tokens_cache_read == 0
+        _accumulate_tokens(state, body, "2024-01-01.jsonl")
+        fe = state.files["2024-01-01.jsonl"]
+        assert fe.input == 110
+        assert fe.output == 55
+
+    def test_separate_days(self) -> None:
+        from src.state import FileEntry
+        state = IngestState(files={
+            "2024-01-01.jsonl": FileEntry(min_seq=1, max_seq=1, input=999),
+            "2024-01-02.jsonl": FileEntry(min_seq=2, max_seq=2),
+        })
+        body = _valid_otlp()
+        body["resourceSpans"][0]["scopeSpans"][0]["spans"].append(
+            _span_with_usage(input_tokens=10, output_tokens=5)
+        )
+        _accumulate_tokens(state, body, "2024-01-02.jsonl")
+        assert state.files["2024-01-01.jsonl"].input == 999
+        assert state.files["2024-01-02.jsonl"].input == 10
+        assert state.files["2024-01-02.jsonl"].output == 5
 
     def test_no_usage_attribute(self) -> None:
-        state = IngestState(tokens_date="2024-01-01", tokens_input=5)
+        from src.state import FileEntry
+        state = IngestState(files={"2024-01-01.jsonl": FileEntry(min_seq=1, max_seq=1, input=5)})
         body = _valid_otlp()
-        _accumulate_tokens(state, body, "2024-01-01")
-        assert state.tokens_input == 5
+        _accumulate_tokens(state, body, "2024-01-01.jsonl")
+        assert state.files["2024-01-01.jsonl"].input == 5
+
+    def test_no_file_entry_does_nothing(self) -> None:
+        state = IngestState()
+        body = _valid_otlp()
+        body["resourceSpans"][0]["scopeSpans"][0]["spans"].append(
+            _span_with_usage(input_tokens=100, output_tokens=50)
+        )
+        _accumulate_tokens(state, body, "missing.jsonl")
 
 
 class TestIngest:

@@ -91,13 +91,10 @@ def validate_otlp(body: dict[str, Any]) -> None:
         raise IngestError(422, "no root span found (all spans have parentSpanId)")
 
 
-def _accumulate_tokens(state: IngestState, body: dict[str, Any], today: str) -> None:
-    if state.tokens_date != today:
-        state.tokens_date = today
-        state.tokens_input = 0
-        state.tokens_output = 0
-        state.tokens_cache_read = 0
-        state.tokens_cache_creation = 0
+def _accumulate_tokens(state: IngestState, body: dict[str, Any], filename: str) -> None:
+    entry = state.files.get(filename)
+    if not entry:
+        return
 
     for rs in body.get("resourceSpans", []):
         for ss in rs.get("scopeSpans", []):
@@ -115,10 +112,10 @@ def _accumulate_tokens(state: IngestState, body: dict[str, Any], today: str) -> 
                         continue
                     if not isinstance(usage, dict):
                         continue
-                    state.tokens_input += int(usage.get("input", 0))
-                    state.tokens_output += int(usage.get("output", 0))
-                    state.tokens_cache_read += int(usage.get("cache_read_input_tokens", 0))
-                    state.tokens_cache_creation += int(usage.get("cache_creation_input_tokens", 0))
+                    entry.input += int(usage.get("input", 0))
+                    entry.output += int(usage.get("output", 0))
+                    entry.cache_read += int(usage.get("cache_read_input_tokens", 0))
+                    entry.cache_creation += int(usage.get("cache_creation_input_tokens", 0))
 
 
 def ingest(body: dict[str, Any], state: IngestState, data_dir: Path, state_path: Path) -> int:
@@ -151,7 +148,7 @@ def ingest(body: dict[str, Any], state: IngestState, data_dir: Path, state_path:
             fcntl.flock(f, fcntl.LOCK_UN)
 
     update_file_entry(state, filename, seq_id)
-    _accumulate_tokens(state, body, today)
+    _accumulate_tokens(state, body, filename)
     save_ingest_state(state_path, state)
 
     logger.debug("ingested seq_id=%d to %s", seq_id, filename)

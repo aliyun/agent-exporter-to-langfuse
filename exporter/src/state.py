@@ -13,6 +13,10 @@ logger = logging.getLogger("langstash.state")
 class FileEntry:
     min_seq: int = 0
     max_seq: int = 0
+    input: int = 0
+    output: int = 0
+    cache_read: int = 0
+    cache_creation: int = 0
 
 
 @dataclass
@@ -27,11 +31,6 @@ class LastError:
 class IngestState:
     next_seq_id: int = 1
     files: dict[str, FileEntry] = field(default_factory=dict)
-    tokens_date: str = ""
-    tokens_input: int = 0
-    tokens_output: int = 0
-    tokens_cache_read: int = 0
-    tokens_cache_creation: int = 0
 
 
 @dataclass
@@ -64,14 +63,33 @@ def load_ingest_state(path: Path) -> IngestState:
             s.files[name] = FileEntry(
                 min_seq=int(entry.get("min_seq", 0)),
                 max_seq=int(entry.get("max_seq", 0)),
+                input=int(entry.get("input", 0)),
+                output=int(entry.get("output", 0)),
+                cache_read=int(entry.get("cache_read", 0)),
+                cache_creation=int(entry.get("cache_creation", 0)),
             )
+
+    # Backward compat: migrate tokens_today into the corresponding file entry
     tokens = raw.get("tokens_today", {})
-    if isinstance(tokens, dict):
-        s.tokens_date = tokens.get("date", "")
-        s.tokens_input = int(tokens.get("input", 0))
-        s.tokens_output = int(tokens.get("output", 0))
-        s.tokens_cache_read = int(tokens.get("cache_read", 0))
-        s.tokens_cache_creation = int(tokens.get("cache_creation", 0))
+    if isinstance(tokens, dict) and tokens.get("date"):
+        fname = f"{tokens['date']}.jsonl"
+        tok_input = int(tokens.get("input", 0))
+        tok_output = int(tokens.get("output", 0))
+        tok_cr = int(tokens.get("cache_read", 0))
+        tok_cc = int(tokens.get("cache_creation", 0))
+        if fname in s.files:
+            fe = s.files[fname]
+            if fe.input == 0 and fe.output == 0:
+                fe.input = tok_input
+                fe.output = tok_output
+                fe.cache_read = tok_cr
+                fe.cache_creation = tok_cc
+        else:
+            s.files[fname] = FileEntry(
+                input=tok_input, output=tok_output,
+                cache_read=tok_cr, cache_creation=tok_cc,
+            )
+
     return s
 
 
@@ -79,18 +97,15 @@ def save_ingest_state(path: Path, state: IngestState) -> None:
     data: dict[str, Any] = {
         "next_seq_id": state.next_seq_id,
         "files": {},
-        "tokens_today": {
-            "date": state.tokens_date,
-            "input": state.tokens_input,
-            "output": state.tokens_output,
-            "cache_read": state.tokens_cache_read,
-            "cache_creation": state.tokens_cache_creation,
-        },
     }
     for name, entry in state.files.items():
         data["files"][name] = {
             "min_seq": entry.min_seq,
             "max_seq": entry.max_seq,
+            "input": entry.input,
+            "output": entry.output,
+            "cache_read": entry.cache_read,
+            "cache_creation": entry.cache_creation,
         }
     _atomic_write(path, data)
 

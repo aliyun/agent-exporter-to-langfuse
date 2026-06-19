@@ -102,9 +102,9 @@ class LangstashApp(rumps.App):
             cache_creation = tokens.get("cache_creation", 0)
             tok = rumps.MenuItem(
                 f"Tokens: {_fmt_count(tok_in)} in / "
-                f"{_fmt_count(tok_out)} out / "
                 f"{_fmt_count(cache_read)} cache-r / "
-                f"{_fmt_count(cache_creation)} cache-w"
+                f"{_fmt_count(cache_creation)} cache-w / "
+                f"{_fmt_count(tok_out)} out"
             )
             tok.set_callback(None)
             self.menu.add(tok)
