@@ -20,6 +20,7 @@
 ## 架构约束
 
 - 运行时配置的读写必须通过 Server API（`GET/POST /settings`）作为唯一入口。UI 客户端（WebUI、Menubar）不得直接调用 `set_config_value` 或持有 `updater`/`config` 等内部对象引用。
+- 本项目的唯一后端是 Langfuse。数据模型、传输协议、字段设计只需满足 Langfuse 的接口和分析需求，不强制要求与 OpenTelemetry GenAI Semantic Conventions 完全对齐。在 Langfuse 已有等价能力的场景下，优先使用 Langfuse 原生概念（如 trace/generation/span、`langfuse.*` 属性），而非引入 OTel GenAI 标准字段。
 
 ## Git Tag 与版本号规范
 
