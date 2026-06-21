@@ -28,6 +28,14 @@ class GitManager:
     def _ensure_fetch_refspec(self) -> None:
         """Ensure bare repo fetches to refs/remotes/origin/* so 'origin/branch' refs work."""
         try:
+            self._run_git(["remote", "get-url", "origin"], cwd=self._local_repo)
+        except subprocess.CalledProcessError:
+            self._run_git(
+                ["remote", "add", "origin", self._repo_url], cwd=self._local_repo,
+            )
+            logger.info("added remote origin = %s", self._repo_url)
+
+        try:
             result = self._run_git(
                 ["config", "remote.origin.fetch"], cwd=self._local_repo,
             )
