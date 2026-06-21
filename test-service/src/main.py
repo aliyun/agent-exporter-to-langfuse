@@ -185,7 +185,7 @@ def _find_uv_python() -> str:
 
 
 def cmd_install(args: argparse.Namespace) -> int:
-    for d in ["config", "repo", "worktrees", "data", "logs"]:
+    for d in ["config", "worktrees", "data", "logs"]:
         (BASE_DIR / d).mkdir(parents=True, exist_ok=True)
     print(f"Directories created under {BASE_DIR}")
 
@@ -270,14 +270,24 @@ WantedBy=default.target
 
     config = load_config(config_path)
     local_repo = Path(config.git.local_repo)
-    if not local_repo.exists() and config.git.repo_url:
+    is_valid_repo = (
+        local_repo.exists()
+        and subprocess.run(
+            ["git", "-C", str(local_repo), "rev-parse", "--is-bare-repository"],
+            capture_output=True, text=True,
+        ).stdout.strip() == "true"
+    )
+    if not is_valid_repo and config.git.repo_url:
+        if local_repo.exists():
+            import shutil
+            shutil.rmtree(local_repo)
         print(f"Cloning bare repo to {local_repo} ...")
         result = subprocess.run(
             ["git", "clone", "--bare", config.git.repo_url, str(local_repo)],
             capture_output=True, text=True,
         )
         if result.returncode == 0:
-            print(f"Bare repo cloned successfully")
+            print("Bare repo cloned successfully")
         else:
             print(f"WARNING: git clone --bare failed: {result.stderr.strip()}", file=sys.stderr)
             print(f"  Run manually: git clone --bare {config.git.repo_url} {local_repo}")
