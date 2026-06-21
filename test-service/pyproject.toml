@@ -20,7 +20,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
-path = "VERSION"
+path = "../VERSION"
 pattern = "(?P<version>\\S+)"
 
 [tool.hatch.build.targets.wheel]

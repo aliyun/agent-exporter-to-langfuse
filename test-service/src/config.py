@@ -1,7 +1,11 @@
 import sys
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 
 BASE_DIR = Path.home() / ".langstash-tester"
@@ -95,7 +99,10 @@ def load_config(config_path: Path | None = None) -> Config:
 
 
 def read_version() -> str:
-    version_file = Path(__file__).resolve().parent.parent / "VERSION"
-    if version_file.exists():
-        return version_file.read_text().strip()
+    for candidate in [
+        Path(__file__).resolve().parent.parent.parent / "VERSION",
+        Path(__file__).resolve().parent.parent / "VERSION",
+    ]:
+        if candidate.exists():
+            return candidate.read_text().strip()
     return "unknown"

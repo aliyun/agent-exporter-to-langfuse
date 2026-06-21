@@ -167,21 +167,102 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _find_uv_python() -> str:
+    """Find the Python interpreter managed by uv for this project."""
+    import shutil
+    test_service_dir = Path(__file__).resolve().parent.parent
+    try:
+        result = subprocess.run(
+            ["uv", "python", "find"], cwd=test_service_dir,
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    uv_python = shutil.which("python3") or "python3"
+    return uv_python
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     for d in ["config", "repo", "worktrees", "data", "logs"]:
         (BASE_DIR / d).mkdir(parents=True, exist_ok=True)
     print(f"Directories created under {BASE_DIR}")
 
+    test_service_dir = Path(__file__).resolve().parent.parent
+    uv_bin = subprocess.run(
+        ["which", "uv"], capture_output=True, text=True,
+    ).stdout.strip() or "uv"
+    working_dir = str(test_service_dir)
+
     bin_dir = Path.home() / ".local" / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     wrapper = bin_dir / "langstash-tester"
-    if not wrapper.exists():
-        wrapper.write_text("#!/bin/sh\nexec python3 -m src \"$@\"\n")
-        wrapper.chmod(0o755)
-        print(f"CLI wrapper created at {wrapper}")
+    wrapper.write_text(
+        f'#!/bin/sh\ncd "{working_dir}" && exec "{uv_bin}" run langstash-tester "$@"\n'
+    )
+    wrapper.chmod(0o755)
+    print(f"CLI wrapper created at {wrapper}")
+
+    if sys.platform == "darwin":
+        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.langstash-tester.plist"
+        plist_path.parent.mkdir(parents=True, exist_ok=True)
+        plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.langstash-tester</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{uv_bin}</string>
+        <string>run</string>
+        <string>langstash-tester</string>
+        <string>run</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>{working_dir}</string>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{BASE_DIR / 'logs' / 'service.log'}</string>
+    <key>StandardErrorPath</key>
+    <string>{BASE_DIR / 'logs' / 'service.log'}</string>
+</dict>
+</plist>
+"""
+        plist_path.write_text(plist_content)
+        print(f"LaunchAgent created at {plist_path}")
+    else:
+        systemd_dir = Path.home() / ".config" / "systemd" / "user"
+        systemd_dir.mkdir(parents=True, exist_ok=True)
+        service_path = systemd_dir / "langstash-tester.service"
+        service_content = f"""[Unit]
+Description=langstash-tester E2E testing service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={working_dir}
+ExecStart={uv_bin} run langstash-tester run
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:{BASE_DIR / 'logs' / 'service.log'}
+StandardError=append:{BASE_DIR / 'logs' / 'service.log'}
+
+[Install]
+WantedBy=default.target
+"""
+        service_path.write_text(service_content)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        subprocess.run(["systemctl", "--user", "enable", "langstash-tester"], capture_output=True)
+        print(f"systemd service created at {service_path}")
 
     print("langstash-tester installed successfully")
     print(f"Edit config: {BASE_DIR / 'config' / 'config.toml'}")
+    print(f"Start with: langstash-tester start")
     return 0
 
 
