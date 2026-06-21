@@ -43,30 +43,8 @@ jobs:
           fi
 
       - name: Generate release notes
-        id: notes
         run: |
-          # Find the previous tag to diff against
-          prev_tag=$(git tag --sort=-v:refname | grep -v "^${{ github.ref_name }}$" | head -1)
-
-          {
-            # Use annotated tag message if available
-            tag_msg=$(git tag -l --format='%(contents)' "${{ github.ref_name }}" | sed '/^$/d')
-            if [ -n "$tag_msg" ]; then
-              echo "$tag_msg"
-              echo ""
-            fi
-
-            # Append commit list
-            if [ -n "$prev_tag" ]; then
-              echo "## Commits"
-              echo ""
-              git log --oneline "${prev_tag}..${{ github.ref_name }}" | while read -r line; do
-                echo "- ${line}"
-              done
-              echo ""
-              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${prev_tag}...${{ github.ref_name }}"
-            fi
-          } > release-notes.md
+          git tag -l --format='%(contents)' "${{ github.ref_name }}" | sed '/^$/d' > release-notes.md
 
       - name: Upload release assets
         env:
