@@ -32,21 +32,8 @@ Orchestrator / CI / curl
 cd test-service
 uv sync
 
-# 创建运行时目录
+# 一键安装（创建目录、生成配置、clone bare repo、注册服务、生成 CLI wrapper）
 uv run langstash-tester install
-
-# 初始化 bare repo（必须手动执行）
-git clone --bare git@github.com:aliyun/agent-exporter-to-langfuse.git ~/.langstash-tester/repo
-
-# 创建配置文件
-cat > ~/.langstash-tester/config/config.toml << 'EOF'
-[server]
-host = "0.0.0.0"
-port = 5289
-
-[git]
-repo_url = "git@github.com:aliyun/agent-exporter-to-langfuse.git"
-EOF
 ```
 
 ## 启动
@@ -129,7 +116,7 @@ curl -X POST http://127.0.0.1:5289/e2e/jobs \
 curl http://127.0.0.1:5289/e2e/jobs/{job_id}
 
 # 列出任务
-curl http://127.0.0.1:5289/e2e/jobs?status=running&limit=10
+curl "http://127.0.0.1:5289/e2e/jobs?status=running&limit=10"
 
 # 获取完整日志
 curl http://127.0.0.1:5289/e2e/jobs/{job_id}/logs

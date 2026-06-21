@@ -260,8 +260,29 @@ WantedBy=default.target
         subprocess.run(["systemctl", "--user", "enable", "langstash-tester"], capture_output=True)
         print(f"systemd service created at {service_path}")
 
+    config_path = BASE_DIR / "config" / "config.toml"
+    if not config_path.exists():
+        config_path.write_text(
+            '[server]\nhost = "0.0.0.0"\nport = 5289\n\n[git]\n'
+            'repo_url = "git@github.com:aliyun/agent-exporter-to-langfuse.git"\n'
+        )
+        print(f"Default config created at {config_path}")
+
+    config = load_config(config_path)
+    local_repo = Path(config.git.local_repo)
+    if not local_repo.exists() and config.git.repo_url:
+        print(f"Cloning bare repo to {local_repo} ...")
+        result = subprocess.run(
+            ["git", "clone", "--bare", config.git.repo_url, str(local_repo)],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            print(f"Bare repo cloned successfully")
+        else:
+            print(f"WARNING: git clone --bare failed: {result.stderr.strip()}", file=sys.stderr)
+            print(f"  Run manually: git clone --bare {config.git.repo_url} {local_repo}")
+
     print("langstash-tester installed successfully")
-    print(f"Edit config: {BASE_DIR / 'config' / 'config.toml'}")
     print(f"Start with: langstash-tester start")
     return 0
 

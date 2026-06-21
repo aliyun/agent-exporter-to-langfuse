@@ -23,25 +23,65 @@ class GitManager:
             print(f"ERROR: bare repo not found at {self._local_repo}", file=sys.stderr)
             print(f"Run: git clone --bare {self._repo_url} {self._local_repo}", file=sys.stderr)
             sys.exit(1)
+        self._ensure_fetch_refspec()
+
+    def _ensure_fetch_refspec(self) -> None:
+        """Ensure bare repo fetches to refs/remotes/origin/* so 'origin/branch' refs work."""
+        try:
+            result = self._run_git(
+                ["config", "remote.origin.fetch"], cwd=self._local_repo,
+            )
+            current = result.stdout.strip()
+        except subprocess.CalledProcessError:
+            current = ""
+        expected = "+refs/heads/*:refs/remotes/origin/*"
+        if current != expected:
+            self._run_git(
+                ["config", "remote.origin.fetch", expected], cwd=self._local_repo,
+            )
+            logger.info("updated bare repo fetch refspec to %s", expected)
 
     def fetch(self) -> None:
         self._run_git(["fetch", "origin"], cwd=self._local_repo)
+
+    def _resolve_ref(self, branch: str, commit: str | None = None) -> str:
+        """Resolve a branch/commit to a valid git ref in the bare repo."""
+        if commit:
+            return commit
+        for candidate in [f"origin/{branch}", branch, f"refs/remotes/origin/{branch}", f"refs/heads/{branch}"]:
+            try:
+                self._run_git(["rev-parse", "--verify", candidate], cwd=self._local_repo)
+                return candidate
+            except subprocess.CalledProcessError:
+                continue
+        return f"origin/{branch}"
 
     def create_worktree(self, job_id: str, branch: str, commit: str | None = None) -> Path:
         worktree_path = self._worktree_dir / job_id
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
-        ref = commit or f"origin/{branch}"
+        ref = self._resolve_ref(branch, commit)
         self._run_git(
             ["worktree", "add", str(worktree_path), ref, "--detach"],
             cwd=self._local_repo,
         )
         return worktree_path
 
+    def _resolve_main_ref(self) -> str:
+        """Find the main branch ref (origin/main or main)."""
+        for candidate in ["origin/main", "main", "refs/remotes/origin/main", "refs/heads/main"]:
+            try:
+                self._run_git(["rev-parse", "--verify", candidate], cwd=self._local_repo)
+                return candidate
+            except subprocess.CalledProcessError:
+                continue
+        return "origin/main"
+
     def merge_main(self, worktree_path: Path) -> None:
+        main_ref = self._resolve_main_ref()
         try:
             self._run_git(
-                ["merge", "origin/main", "--no-edit"],
+                ["merge", main_ref, "--no-edit"],
                 cwd=worktree_path,
             )
         except subprocess.CalledProcessError:
