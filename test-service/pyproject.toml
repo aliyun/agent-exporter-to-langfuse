@@ -1,0 +1,30 @@
+[project]
+name = "langstash-tester"
+dynamic = ["version"]
+description = "E2E testing service for agent-exporter-to-langfuse"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "httpx>=0.24",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "pytest-httpx>=0.30"]
+
+[project.scripts]
+langstash-tester = "src.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "../VERSION"
+pattern = "(?P<version>\\S+)"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "pytest-httpx>=0.30"]
