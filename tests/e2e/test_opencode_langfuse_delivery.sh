@@ -425,7 +425,7 @@ run_module_1() {
        LANGFUSE_PUBLIC_KEY="pk-lf-test-e2e" \
        LANGFUSE_BASE_URL="http://127.0.0.1:9999" \
        bash "$REPO_ROOT/deploy/installer.sh" install \
-           --package-url "file://${TARBALL}" >/dev/null 2>&1; then
+           --package-url "file://${TARBALL}" 2>&1; then
         e2e_pass "M1-1: Install agent-exporter-to-langfuse"
     else
         e2e_fail "M1-1: Install agent-exporter-to-langfuse"
@@ -466,7 +466,7 @@ run_module_2() {
     LANGFUSE_PUBLIC_KEY="$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" \
     LANGFUSE_BASE_URL="http://127.0.0.1:${LANGFUSE_PORT}" \
     bash "$REPO_ROOT/deploy/installer.sh" install \
-        --package-url "file://${TARBALL}" >/dev/null 2>&1 || {
+        --package-url "file://${TARBALL}" 2>&1 || {
         e2e_fail "M2-2: Install and start langstash pointing to Docker Langfuse"
         stop_langstash; stop_docker_langfuse; purge_install
         e2e_summary || true; return 1
@@ -575,7 +575,7 @@ run_module_3() {
        LANGFUSE_PUBLIC_KEY="pk-e2e-test" \
        LANGFUSE_BASE_URL="http://127.0.0.1:9999" \
        bash "$REPO_ROOT/deploy/installer.sh" install \
-           --package-url "file://${TARBALL}" >/dev/null 2>&1; then
+           --package-url "file://${TARBALL}" 2>&1; then
         e2e_pass "M3-1: Install agent-exporter-to-langfuse"
     else
         e2e_fail "M3-1: Install agent-exporter-to-langfuse"
@@ -589,7 +589,7 @@ run_module_3() {
         --secret-key "sk-e2e-test" \
         --public-key "pk-e2e-test" \
         --base-url "http://127.0.0.1:9999" \
-        -y >/dev/null 2>&1; then
+        -y 2>&1; then
         e2e_pass "M3-2: Install OpenCode hook"
     else
         e2e_fail "M3-2: Install OpenCode hook"
@@ -676,7 +676,7 @@ run_module_4() {
     LANGFUSE_PUBLIC_KEY="$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" \
     LANGFUSE_BASE_URL="http://127.0.0.1:${LANGFUSE_PORT}" \
     bash "$REPO_ROOT/deploy/installer.sh" install \
-        --package-url "file://${TARBALL}" >/dev/null 2>&1 || {
+        --package-url "file://${TARBALL}" 2>&1 || {
         e2e_fail "M4-2: Install and start langstash pointing to Docker Langfuse"
         stop_langstash; stop_docker_langfuse; purge_install
         e2e_summary || true; return 0
@@ -696,7 +696,7 @@ run_module_4() {
         --secret-key "$LANGFUSE_INIT_PROJECT_SECRET_KEY" \
         --public-key "$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" \
         --base-url "http://127.0.0.1:${LANGFUSE_PORT}" \
-        -y >/dev/null 2>&1; then
+        -y 2>&1; then
         e2e_pass "M4-3: Install OpenCode hook"
     else
         e2e_fail "M4-3: Install OpenCode hook"
