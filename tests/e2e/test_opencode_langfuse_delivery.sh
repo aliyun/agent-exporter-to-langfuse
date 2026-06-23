@@ -69,10 +69,13 @@ services:
     image: clickhouse/clickhouse-server:latest
     restart: always
     healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      test: ["CMD", "clickhouse-client", "--user", "default", "--password", "e2e-ch-pass", "--query", "SELECT 1"]
       interval: 5s
       timeout: 3s
       retries: 10
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: e2e-ch-pass
 
   minio:
     image: minio/minio:latest
@@ -108,12 +111,13 @@ services:
       NEXTAUTH_SECRET: e2e-nextauth-secret
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       SALT: e2e-salt-value
-      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+      ENCRYPTION_KEY: e2ee00000000000000000000000000000000000000000000000000000000000e
       TELEMETRY_ENABLED: false
-      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
-      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://default:e2e-ch-pass@clickhouse:9000
+      CLICKHOUSE_URL: http://default:e2e-ch-pass@clickhouse:8123
       CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_PASSWORD: e2e-ch-pass
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_AUTH: ""
@@ -154,12 +158,13 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       SALT: e2e-salt-value
-      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+      ENCRYPTION_KEY: e2ee00000000000000000000000000000000000000000000000000000000000e
       TELEMETRY_ENABLED: false
-      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
-      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://default:e2e-ch-pass@clickhouse:9000
+      CLICKHOUSE_URL: http://default:e2e-ch-pass@clickhouse:8123
       CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_PASSWORD: e2e-ch-pass
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_AUTH: ""
