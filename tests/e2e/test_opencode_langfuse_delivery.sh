@@ -10,6 +10,10 @@ INSTALL_DIR="$HOME/.agent-exporter-to-langfuse"
 OC_CONFIG_DIR="$HOME/.config/opencode"
 LANGFUSE_PORT=3000
 LANGSTASH_PORT=5288
+
+# Ensure common tool paths are in PATH (uv, langstash, etc.)
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
 COMPOSE_DIR="/tmp/e2e-compose-$$"
 DOCKER_NETWORK="e2e-langfuse-net-$$"
 
