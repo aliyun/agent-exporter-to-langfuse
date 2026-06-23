@@ -11,6 +11,14 @@ OC_CONFIG_DIR="$HOME/.config/opencode"
 LANGFUSE_PORT=3000
 LANGSTASH_PORT=5288
 
+# External Langfuse configuration (optional — bypasses Docker)
+# Set E2E_USE_EXTERNAL_LANGFUSE=true and provide credentials to use an existing
+# Langfuse instance instead of starting Docker containers.
+E2E_USE_EXTERNAL_LANGFUSE="${E2E_USE_EXTERNAL_LANGFUSE:-false}"
+E2E_LANGFUSE_BASE_URL="${E2E_LANGFUSE_BASE_URL:-http://127.0.0.1:3000}"
+E2E_LANGFUSE_PUBLIC_KEY="${E2E_LANGFUSE_PUBLIC_KEY:-}"
+E2E_LANGFUSE_SECRET_KEY="${E2E_LANGFUSE_SECRET_KEY:-}"
+
 # Ensure common tool paths are in PATH (uv, langstash, etc.)
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
@@ -181,6 +189,13 @@ COMPOSEEOF
 }
 
 start_docker_langfuse() {
+    # If external Langfuse is configured, skip Docker entirely
+    if [ "$E2E_USE_EXTERNAL_LANGFUSE" = "true" ] && [ -n "$E2E_LANGFUSE_PUBLIC_KEY" ] && [ -n "$E2E_LANGFUSE_SECRET_KEY" ]; then
+        echo "  Using external Langfuse at $E2E_LANGFUSE_BASE_URL"
+        LANGFUSE_INIT_PROJECT_PUBLIC_KEY="$E2E_LANGFUSE_PUBLIC_KEY"
+        LANGFUSE_INIT_PROJECT_SECRET_KEY="$E2E_LANGFUSE_SECRET_KEY"
+        return 0
+    fi
     stop_docker_langfuse
     if ! command -v docker &>/dev/null; then
         echo "  Docker not available"
@@ -210,6 +225,10 @@ start_docker_langfuse() {
 }
 
 stop_docker_langfuse() {
+    # Skip Docker cleanup when using external Langfuse
+    if [ "$E2E_USE_EXTERNAL_LANGFUSE" = "true" ]; then
+        return 0
+    fi
     if [ -f "$COMPOSE_DIR/docker-compose.yml" ]; then
         docker compose -f "$COMPOSE_DIR/docker-compose.yml" down -v 2>&1 || true
     fi
