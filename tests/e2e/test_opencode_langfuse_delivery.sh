@@ -490,7 +490,7 @@ run_module_2() {
     purge_install
     LANGFUSE_SECRET_KEY="$LANGFUSE_INIT_PROJECT_SECRET_KEY" \
     LANGFUSE_PUBLIC_KEY="$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" \
-    LANGFUSE_BASE_URL="http://127.0.0.1:${LANGFUSE_PORT}" \
+    LANGFUSE_BASE_URL="${E2E_LANGFUSE_BASE_URL:-http://127.0.0.1:${LANGFUSE_PORT}}" \
     bash "$REPO_ROOT/deploy/installer.sh" install \
         --package-url "file://${TARBALL}" 2>&1 || {
         e2e_fail "M2-2: Install and start langstash pointing to Docker Langfuse"
@@ -700,7 +700,7 @@ run_module_4() {
     purge_install
     LANGFUSE_SECRET_KEY="$LANGFUSE_INIT_PROJECT_SECRET_KEY" \
     LANGFUSE_PUBLIC_KEY="$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" \
-    LANGFUSE_BASE_URL="http://127.0.0.1:${LANGFUSE_PORT}" \
+    LANGFUSE_BASE_URL="${E2E_LANGFUSE_BASE_URL:-http://127.0.0.1:${LANGFUSE_PORT}}" \
     bash "$REPO_ROOT/deploy/installer.sh" install \
         --package-url "file://${TARBALL}" 2>&1 || {
         e2e_fail "M4-2: Install and start langstash pointing to Docker Langfuse"
