@@ -190,7 +190,7 @@ start_docker_langfuse() {
     fi
     write_compose_file
     echo "  Starting Docker Langfuse via docker compose..."
-    docker compose -f "$COMPOSE_DIR/docker-compose.yml" up -d >/dev/null 2>&1 || {
+    docker compose -f "$COMPOSE_DIR/docker-compose.yml" up -d 2>&1 || {
         echo "  Failed to start Docker Langfuse (docker compose failed)"
         return 1
     }
@@ -213,7 +213,7 @@ start_docker_langfuse() {
 
 stop_docker_langfuse() {
     if [ -f "$COMPOSE_DIR/docker-compose.yml" ]; then
-        docker compose -f "$COMPOSE_DIR/docker-compose.yml" down -v >/dev/null 2>&1 || true
+        docker compose -f "$COMPOSE_DIR/docker-compose.yml" down -v 2>&1 || true
     fi
     rm -rf "$COMPOSE_DIR"
 }
