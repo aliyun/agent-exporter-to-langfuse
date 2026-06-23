@@ -19,10 +19,9 @@ E2E_LANGFUSE_BASE_URL="${E2E_LANGFUSE_BASE_URL:-http://127.0.0.1:3000}"
 E2E_LANGFUSE_PUBLIC_KEY="${E2E_LANGFUSE_PUBLIC_KEY:-}"
 E2E_LANGFUSE_SECRET_KEY="${E2E_LANGFUSE_SECRET_KEY:-}"
 
-# Source e2e config file (~/.zshenv does NOT work for systemd services)
-E2E_ENV_FILE="${E2E_ENV_FILE:-$HOME/.agent-exporter-to-langfuse/config/.zshenv}"
-if [ -f "$E2E_ENV_FILE" ]; then
-    . "$E2E_ENV_FILE"
+# Source ~/.zshenv for E2E config (E2E_USE_EXTERNAL_LANGFUSE, etc.)
+if [ -f "$HOME/.zshenv" ]; then
+    . "$HOME/.zshenv"
 fi
 
 # Ensure common tool paths are in PATH (uv, langstash, etc.)
