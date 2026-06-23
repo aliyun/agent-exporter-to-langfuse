@@ -214,6 +214,30 @@ stop_docker_langfuse() {
     rm -rf "$COMPOSE_DIR"
 }
 
+
+# Start langstash directly (bypass systemd which may not find the service file
+# in non-standard HOME directories like Hermes profile home).
+start_langstash() {
+    stop_langstash
+    nohup ~/.local/bin/langstash run --server-only >/dev/null 2>&1 &
+    local pid=$!
+    # Verify process started
+    sleep 2
+    if kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+stop_langstash() {
+    local pid
+    pid=$(pgrep -f "langstash run" 2>/dev/null || true)
+    if [ -n "$pid" ]; then
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+    fi
+}
+
 wait_langstash_health() {
     local timeout="${1:-60}"
     local elapsed=0
@@ -402,6 +426,7 @@ run_module_1() {
     fi
 
     e2e_case "M1-2: langstash /health returns 200 and status healthy"
+    start_langstash || true
     if wait_langstash_health 60; then
         e2e_pass "M1-2: langstash /health returns 200 and status healthy"
     else
@@ -441,6 +466,7 @@ run_module_2() {
         e2e_summary || true; return 1
     }
     echo "  Keys: pk=${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:0:12}... sk=${LANGFUSE_INIT_PROJECT_SECRET_KEY:0:12}..."
+    start_langstash
     if wait_langstash_health 60; then
         e2e_pass "M2-2: Install and start langstash pointing to Docker Langfuse"
     else
@@ -650,6 +676,7 @@ run_module_4() {
         e2e_summary || true; return 0
     }
     echo "  Keys: pk=${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:0:12}... sk=${LANGFUSE_INIT_PROJECT_SECRET_KEY:0:12}..."
+    start_langstash
     if wait_langstash_health 60; then
         e2e_pass "M4-2: Install and start langstash pointing to Docker Langfuse"
     else
