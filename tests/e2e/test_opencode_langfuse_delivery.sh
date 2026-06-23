@@ -19,6 +19,14 @@ E2E_LANGFUSE_BASE_URL="${E2E_LANGFUSE_BASE_URL:-http://127.0.0.1:3000}"
 E2E_LANGFUSE_PUBLIC_KEY="${E2E_LANGFUSE_PUBLIC_KEY:-}"
 E2E_LANGFUSE_SECRET_KEY="${E2E_LANGFUSE_SECRET_KEY:-}"
 
+# Source external E2E env file if present (allows non-Docker Langfuse config
+# to be set without modifying systemd environment)
+E2E_ENV_FILE="${E2E_ENV_FILE:-$HOME/.agent-exporter-to-langfuse/config/e2e.env}"
+if [ -f "$E2E_ENV_FILE" ]; then
+    . "$E2E_ENV_FILE"
+    echo "  Loaded E2E config from $E2E_ENV_FILE"
+fi
+
 # Ensure common tool paths are in PATH (uv, langstash, etc.)
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
