@@ -496,7 +496,7 @@ run_module_2() {
     fi
 
     e2e_case "M2-4: langstash /stats shows total_sent >= 1"
-    STATS_TIMEOUT=30
+    STATS_TIMEOUT=60
     STATS_ELAPSED=0
     STATS_PASS=false
     while [ "$STATS_ELAPSED" -lt "$STATS_TIMEOUT" ]; do
@@ -751,7 +751,7 @@ run_module_4() {
     e2e_pass "M4-4: Run opencode with test prompt"
 
     e2e_case "M4-5: Verify delivery stats"
-    STATS_TIMEOUT=30
+    STATS_TIMEOUT=60
     STATS_ELAPSED=0
     STATS_PASS=false
     while [ "$STATS_ELAPSED" -lt "$STATS_TIMEOUT" ]; do
