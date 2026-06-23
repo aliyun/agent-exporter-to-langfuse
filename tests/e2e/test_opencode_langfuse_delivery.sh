@@ -511,7 +511,8 @@ run_module_2() {
     TRACE_ID="$(python3 -c 'import os; print(os.urandom(16).hex())')"
     ROOT_SPAN_ID="$(python3 -c 'import os; print(os.urandom(8).hex())')"
     GEN_SPAN_ID="$(python3 -c 'import os; print(os.urandom(8).hex())')"
-    OTLP_JSON="$(make_otlp_trace "$TRACE_ID" "$ROOT_SPAN_ID" "$GEN_SPAN_ID" "e2e-synthetic-test" "e2e-synthetic-gen" "e2e-model")"
+    TRACE_TS=$(date +%s)
+    OTLP_JSON="$(make_otlp_trace "$TRACE_ID" "$ROOT_SPAN_ID" "$GEN_SPAN_ID" "e2e-synthetic-test-${TRACE_TS}" "e2e-synthetic-gen-${TRACE_TS}" "e2e-model-${TRACE_TS}")"
     INGEST_RESP=$(curl -sf -X POST "http://127.0.0.1:${LANGSTASH_PORT}/ingest" \
         -H "Content-Type: application/json" \
         -d "$OTLP_JSON" 2>/dev/null || echo "")
@@ -557,11 +558,11 @@ run_module_2() {
     TRACE_PASS=false
     while [ "$TRACE_ELAPSED" -lt "$TRACE_QUERY_TIMEOUT" ]; do
         MATCH=$(verify_trace_in_langfuse \
-            "http://127.0.0.1:${LANGFUSE_PORT}" \
+            "${E2E_LANGFUSE_BASE_URL:-http://127.0.0.1:${LANGFUSE_PORT}}" \
             "$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" \
             "$LANGFUSE_INIT_PROJECT_SECRET_KEY" \
-            "e2e-synthetic-test" \
-            "e2e-model" \
+            "e2e-synthetic-test-${TRACE_TS}" \
+            "e2e-model-${TRACE_TS}" \
             "e2e-test-input")
         if [ "$MATCH" = "match" ]; then
             echo "  Trace found in Langfuse API after ${TRACE_ELAPSED}s"
