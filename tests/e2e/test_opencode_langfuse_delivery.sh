@@ -20,7 +20,7 @@ E2E_LANGFUSE_PUBLIC_KEY="${E2E_LANGFUSE_PUBLIC_KEY:-}"
 E2E_LANGFUSE_SECRET_KEY="${E2E_LANGFUSE_SECRET_KEY:-}"
 
 # Source e2e config file (~/.zshenv does NOT work for systemd services)
-E2E_ENV_FILE="${E2E_ENV_FILE:-$HOME/.agent-exporter-to-langfuse/config/e2e.env}"
+E2E_ENV_FILE="${E2E_ENV_FILE:-$HOME/.agent-exporter-to-langfuse/config/.zshenv}"
 if [ -f "$E2E_ENV_FILE" ]; then
     . "$E2E_ENV_FILE"
 fi
