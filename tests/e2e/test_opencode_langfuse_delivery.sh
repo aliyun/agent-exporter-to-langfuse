@@ -218,13 +218,19 @@ stop_docker_langfuse() {
 # Start langstash directly (bypass systemd which may not find the service file
 # in non-standard HOME directories like Hermes profile home).
 start_langstash() {
+    # Try systemd first (works on standard Linux with systemd user services)
+    if command -v systemctl &>/dev/null && systemctl --user status langstash >/dev/null 2>&1; then
+        systemctl --user restart langstash 2>/dev/null && return 0
+    fi
+    # Fall back to direct start (for non-standard HOME like Hermes profiles)
     stop_langstash
-    nohup ~/.local/bin/langstash run --server-only >/dev/null 2>&1 &
-    local pid=$!
-    # Verify process started
-    sleep 2
-    if kill -0 "$pid" 2>/dev/null; then
-        return 0
+    if [ -x ~/.local/bin/langstash ]; then
+        nohup ~/.local/bin/langstash run --server-only >/dev/null 2>&1 &
+        local pid=$!
+        sleep 2
+        if kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
     fi
     return 1
 }
