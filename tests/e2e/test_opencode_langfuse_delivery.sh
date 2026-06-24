@@ -742,7 +742,19 @@ run_module_4() {
     fi
 
     e2e_case "M4-4: Run opencode with test prompt"
-    if ! command -v opencode &>/dev/null; then
+    # Search for opencode in common locations
+    OPENCODE_BIN=""
+    for _d in "$HOME/.local/bin" "$HOME/.bun/bin" /usr/local/bin /usr/bin; do
+        if [ -x "$_d/opencode" ]; then
+            OPENCODE_BIN="$_d/opencode"
+            export PATH="$_d:$PATH"
+            break
+        fi
+    done
+    if [ -z "$OPENCODE_BIN" ]; then
+        OPENCODE_BIN="opencode"
+    fi
+    if ! command -v "$OPENCODE_BIN" &>/dev/null && ! command -v opencode &>/dev/null; then
         echo "  opencode not found in PATH"
         e2e_fail "M4-4: Run opencode with test prompt"
         manual_only_count=$((manual_only_count + 1))
@@ -766,7 +778,7 @@ run_module_4() {
     OPENCODE_EXIT=0
     OPENCODE_TIMEOUT=120
     echo "  Running: opencode run 'e2e-test-hello' (timeout: ${OPENCODE_TIMEOUT}s)..."
-    OPENCODE_OUTPUT=$(run_with_timeout "$OPENCODE_TIMEOUT" opencode run "e2e-test-hello") || OPENCODE_EXIT=$?
+    OPENCODE_OUTPUT=$(run_with_timeout "$OPENCODE_TIMEOUT" "$OPENCODE_BIN" run "e2e-test-hello") || OPENCODE_EXIT=$?
     if [ "$OPENCODE_EXIT" -ne 0 ]; then
         echo "  opencode run exited with code $OPENCODE_EXIT"
         echo "  output (first 200 chars): ${OPENCODE_OUTPUT:0:200}"
