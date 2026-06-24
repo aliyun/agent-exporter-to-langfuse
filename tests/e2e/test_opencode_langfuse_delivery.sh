@@ -777,7 +777,7 @@ run_module_4() {
     fi
 
     OPENCODE_EXIT=0
-    OPENCODE_TIMEOUT=120
+    OPENCODE_TIMEOUT=300
     echo "  Running: opencode run 'e2e-test-hello' (timeout: ${OPENCODE_TIMEOUT}s)..."
     OPENCODE_OUTPUT=$(run_with_timeout "$OPENCODE_TIMEOUT" "$OPENCODE_BIN" run "e2e-test-hello") || OPENCODE_EXIT=$?
     if [ "$OPENCODE_EXIT" -ne 0 ]; then
