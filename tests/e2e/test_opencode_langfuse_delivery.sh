@@ -19,13 +19,14 @@ E2E_LANGFUSE_BASE_URL="${E2E_LANGFUSE_BASE_URL:-http://127.0.0.1:3000}"
 E2E_LANGFUSE_PUBLIC_KEY="${E2E_LANGFUSE_PUBLIC_KEY:-}"
 E2E_LANGFUSE_SECRET_KEY="${E2E_LANGFUSE_SECRET_KEY:-}"
 
+# Ensure common tool paths are in PATH (uv, langstash, opencode, etc.)
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.bun/bin:$PATH"
+
 # Source ~/.zshenv for E2E config (E2E_USE_EXTERNAL_LANGFUSE, etc.)
+# Sourced AFTER PATH export so user's PATH takes precedence
 if [ -f "$HOME/.zshenv" ]; then
     . "$HOME/.zshenv"
 fi
-
-# Ensure common tool paths are in PATH (uv, langstash, opencode, etc.)
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.bun/bin:$PATH"
 # Also scan for opencode in common locations
 for _dir in "$HOME/.bun/bin" /usr/local/bin; do
     if [ -x "$_dir/opencode" ]; then
