@@ -785,7 +785,7 @@ run_module_4() {
         echo "  output (first 200 chars): ${OPENCODE_OUTPUT:0:200}"
         # If opencode produced JSON output (step_start), it started processing —
         # timeout is expected for slow AI models. Treat as pass.
-        if echo "$OPENCODE_OUTPUT" | grep -q '"type":"step_start"'; then
+        if [[ "$OPENCODE_OUTPUT" == *"step_start"* ]]; then
             echo "  opencode started and produced output — treating timeout as pass"
             e2e_pass "M4-4: Run opencode with test prompt"
         else
