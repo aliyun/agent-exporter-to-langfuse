@@ -744,7 +744,7 @@ run_module_4() {
     e2e_case "M4-4: Run opencode with test prompt"
     # Search for opencode in common locations
     OPENCODE_BIN=""
-    for _d in "$HOME/.local/bin" "$HOME/.bun/bin" /usr/local/bin /usr/bin; do
+    for _d in "$HOME/.local/bin" "$HOME/.bun/bin" /usr/local/bin /usr/bin $(find /usr/lib /opt -maxdepth 4 -name opencode -type f -exec dirname {} \; 2>/dev/null); do
         if [ -x "$_d/opencode" ]; then
             OPENCODE_BIN="$_d/opencode"
             export PATH="$_d:$PATH"
