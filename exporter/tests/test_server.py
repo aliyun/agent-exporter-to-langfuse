@@ -256,3 +256,14 @@ class TestRetryHooks:
             resp = client.post("/upgrade/retry-hooks?agent=cursor")
         assert resp.status_code == 500
         assert resp.json()["status"] == "error"
+
+    def test_retry_hooks_exception_returns_internal_error(self, app_env) -> None:
+        client, *_ = app_env
+        with patch("src.server.start_upgrade", side_effect=RuntimeError("boom")), \
+             patch("src.server.logger") as mock_logger:
+            resp = client.post("/upgrade/retry-hooks")
+        assert resp.status_code == 500, f"expected 500, got {resp.status_code}"
+        data = resp.json()
+        assert data["status"] == "error", f"expected status=error, got {data['status']}"
+        assert data["message"] == "internal error", f"expected message='internal error', got '{data['message']}'"
+        mock_logger.exception.assert_called_once_with("retry-hooks internal error")
