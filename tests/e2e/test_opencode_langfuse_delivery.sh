@@ -369,7 +369,8 @@ query_langfuse_traces() {
     local public_key="$2"
     local secret_key="$3"
     local name_filter="$4"
-    curl -sf "${base_url}/api/public/traces?nameContains=${name_filter}&limit=10" \
+    local from_ts="$5"
+    curl -sf "${base_url}/api/public/traces?name=${name_filter}&fromTimestamp=${from_ts}&limit=10" \
         -u "${public_key}:${secret_key}" 2>/dev/null || echo '{"data":[]}'
 }
 
@@ -391,7 +392,7 @@ verify_trace_in_langfuse() {
     local expected_model="$5"
     local expected_input="$6"
     local traces_json
-    traces_json=$(query_langfuse_traces "$base_url" "$public_key" "$secret_key" "$trace_name_filter")
+    traces_json=$(query_langfuse_traces "$base_url" "$public_key" "$secret_key" "$trace_name_filter" "${TRACE_ISO}")
     python3 -c "
 import json, sys
 base_url, public_key, secret_key, exp_model, exp_input = sys.argv[2:7]
@@ -512,6 +513,7 @@ run_module_2() {
     ROOT_SPAN_ID="$(python3 -c 'import os; print(os.urandom(8).hex())')"
     GEN_SPAN_ID="$(python3 -c 'import os; print(os.urandom(8).hex())')"
     TRACE_TS=$(date +%s)
+    TRACE_ISO=$(date -u -d "@${TRACE_TS}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "${TRACE_TS}" +%Y-%m-%dT%H:%M:%SZ)
     OTLP_JSON="$(make_otlp_trace "$TRACE_ID" "$ROOT_SPAN_ID" "$GEN_SPAN_ID" "e2e-synthetic-test-${TRACE_TS}" "e2e-synthetic-gen-${TRACE_TS}" "e2e-model-${TRACE_TS}")"
     INGEST_RESP=$(curl -sf -X POST "http://127.0.0.1:${LANGSTASH_PORT}/ingest" \
         -H "Content-Type: application/json" \
