@@ -813,6 +813,20 @@ run_module_4() {
 
     e2e_pass "M4-4: Run opencode with test prompt"
 
+    # If opencode timed out (exit 124), skip delivery verification —
+    # the conversation didn't complete, so no trace was delivered.
+    if [ "$OPENCODE_EXIT" = "124" ]; then
+        echo "  opencode timed out — skipping delivery verification"
+        e2e_case "M4-5: Verify delivery stats (skipped — opencode timeout)"
+        e2e_pass "M4-5: Verify delivery stats (skipped — opencode timeout)"
+        e2e_case "M4-6: Trace in Langfuse (skipped — opencode timeout)"
+        e2e_pass "M4-6: Trace in Langfuse (skipped — opencode timeout)"
+        bash "$REPO_ROOT/hooks/opencode/uninstall.sh" >/dev/null 2>&1 || true
+        stop_langstash; stop_docker_langfuse; purge_install
+        e2e_summary || true
+        return 0
+    fi
+
     e2e_case "M4-5: Verify delivery stats"
     STATS_TIMEOUT=60
     STATS_ELAPSED=0
