@@ -174,7 +174,7 @@ class Worker:
         env["LANGSTASH_TESTER_JOB_ID"] = job_id
 
         process = subprocess.Popen(
-            ["bash", "-c", command],
+            ["bash", "-l", "-c", command],
             cwd=worktree_path,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
