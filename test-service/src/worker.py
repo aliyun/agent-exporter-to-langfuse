@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import threading
@@ -15,6 +16,13 @@ from src.queue import JobQueue
 from src.store import Store
 
 logger = logging.getLogger("langstash-tester.worker")
+
+_UV_CANDIDATE_PATHS = [
+    Path.home() / ".local" / "bin" / "uv",
+    Path.home() / ".cargo" / "bin" / "uv",
+    Path("/usr/local/bin/uv"),
+    Path("/opt/homebrew/bin/uv"),
+]
 
 
 class Worker:
@@ -160,7 +168,10 @@ class Worker:
             )
 
         finally:
-            self._git.remove_worktree(job_id)
+            try:
+                self._git.remove_worktree(job_id)
+            except Exception as e:
+                logger.warning("failed to remove worktree for job %s: %s", job_id, e)
 
     def _run_tests(self, job_id: str, worktree_path: Path, command: str,
                    timeout: int) -> tuple[int | None, ProgressParser]:
@@ -238,13 +249,27 @@ class Worker:
     def _maybe_uv_sync(self, worktree_path: Path) -> None:
         pyproject = worktree_path / "exporter" / "pyproject.toml"
         if pyproject.exists():
+            uv_bin = self._resolve_uv()
+            if uv_bin is None:
+                logger.warning("uv not found in PATH or known locations; skipping uv sync")
+                return
             try:
                 subprocess.run(
-                    ["uv", "sync"], cwd=worktree_path / "exporter",
+                    [uv_bin, "sync"], cwd=worktree_path / "exporter",
                     capture_output=True, timeout=120,
                 )
             except Exception as e:
                 logger.warning("uv sync failed: %s", e)
+
+    @staticmethod
+    def _resolve_uv() -> str | None:
+        uv = shutil.which("uv")
+        if uv:
+            return uv
+        for c in _UV_CANDIDATE_PATHS:
+            if c.is_file() and os.access(c, os.X_OK):
+                return str(c)
+        return None
 
     @staticmethod
     def _get_head_commit(worktree_path: Path) -> str | None:
