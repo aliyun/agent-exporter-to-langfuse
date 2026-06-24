@@ -22,6 +22,22 @@
 - 运行时配置的读写必须通过 Server API（`GET/POST /settings`）作为唯一入口。UI 客户端（WebUI、Menubar）不得直接调用 `set_config_value` 或持有 `updater`/`config` 等内部对象引用。
 - 本项目的唯一后端是 Langfuse。数据模型、传输协议、字段设计只需满足 Langfuse 的接口和分析需求，不强制要求与 OpenTelemetry GenAI Semantic Conventions 完全对齐。在 Langfuse 已有等价能力的场景下，优先使用 Langfuse 原生概念（如 trace/generation/span、`langfuse.*` 属性），而非引入 OTel GenAI 标准字段。
 
+## 测试诊断信息规范
+
+- 所有测试代码（Python pytest、TypeScript vitest、shell E2E 脚本）在断言失败或异常抛出时，输出必须保留足够让"无额外上下文的 AI agent"直接定位失败原因的诊断信息，至少包含：异常类型与异常消息、与失败断言相关的实际值、以及子进程场景下被调用命令的 stderr 与退出码。这些测试主要由 AI agent 在执行实现计划（plan gate）与排查问题时反复运行，失败输出的质量直接决定 AI 排查效率。
+- 预期异常必须用框架的显式机制捕获并断言，禁止用 `try/except: pass`（含 `except Exception: pass`、裸 `except: pass`）表示"预期异常已抛出"：
+  - Python 用 `pytest.raises(<ExceptionType>)`，必要时配合 `match=` 断言异常消息、或经 `exc_info` 断言异常属性（如 `status`、`message`）。
+  - TypeScript 用 `await expect(...).rejects.toThrow(<message>)`。
+  - 禁止 `except Exception: pass` 使非预期异常（如 `AttributeError`、`TypeError`）静默通过、测试假绿。
+  - 不得用宽泛的 `except Exception` 覆盖本应精确匹配的预期异常类型；预期异常须以具体类型（如 `RuntimeError`）捕获。
+- 关键断言须携带业务语义上下文，使失败输出包含业务语义而非仅一行表达式：
+  - Python 用 `assert x == y, "<业务语义>"`，或通过 `exc_info` / `caplog` 补充上下文。
+  - TypeScript 用 `expect(x, "<业务语义>").toBe(y)`，或通过 `describe` / `it` 标题表达语义。
+  - 纯类型判断、存在性、空值判断等简单断言不强制带 `msg`，避免噪声。
+- 子进程与 E2E 命令不得丢弃 stderr：
+  - 测试中调用子进程或外部命令时，禁止用 `2>/dev/null` 或 `>/dev/null 2>&1 || true` 静默丢弃输出。
+  - 命令失败时必须回显其 stderr 与退出码作为诊断信息；E2E / 集成检查辅助函数在断言失败时须输出被测命令的 stderr，而非仅打印 `FAIL <name>`。
+
 ## Git Tag 与版本号规范
 
 - Tag 格式：`v<major>.<minor>.<patch>`，例如 `v1.0.0`、`v2.3.4`。
