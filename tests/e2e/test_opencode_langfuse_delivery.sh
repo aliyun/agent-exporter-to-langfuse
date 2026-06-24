@@ -408,7 +408,7 @@ for t in traces:
     tid = t.get('id', '')
     import urllib.request, base64
     creds = base64.b64encode(f'{public_key}:{secret_key}'.encode()).decode()
-    url = f'{base_url}/api/public/observations?traceId={tid}&type=GENERATION&limit=10&fields=core,basic,usage'
+    url = f'{base_url}/api/public/observations?traceId={tid}&limit=10&fields=core,basic,usage'
     req = urllib.request.Request(url, headers={'Authorization': f'Basic {creds}'})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -416,7 +416,7 @@ for t in traces:
     except:
         continue
     for o in obs_data.get('data', []):
-        model = o.get('model', '') or ''
+        model = (o.get('metadata', {}).get('attributes', {}) or {}).get('langfuse.observation.model', '') or o.get('model', '') or ''
         input_val = str(o.get('input', '')) or ''
         if exp_model and exp_model in model:
             if not exp_input or exp_input in input_val:
