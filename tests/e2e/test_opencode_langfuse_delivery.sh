@@ -855,10 +855,10 @@ run_module_4() {
     TRACE_PASS=false
     while [ "$TRACE_ELAPSED" -lt "$TRACE_QUERY_TIMEOUT" ]; do
         MATCH=$(verify_trace_in_langfuse \
-            "http://127.0.0.1:${LANGFUSE_PORT}" \
+            "${E2E_LANGFUSE_BASE_URL:-http://127.0.0.1:${LANGFUSE_PORT}}" \
             "$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" \
             "$LANGFUSE_INIT_PROJECT_SECRET_KEY" \
-            "" \
+            "OpenCode" \
             "" \
             "e2e")
         if [ "$MATCH" = "match" ]; then
