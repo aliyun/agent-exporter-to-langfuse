@@ -24,8 +24,15 @@ if [ -f "$HOME/.zshenv" ]; then
     . "$HOME/.zshenv"
 fi
 
-# Ensure common tool paths are in PATH (uv, langstash, etc.)
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+# Ensure common tool paths are in PATH (uv, langstash, opencode, etc.)
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.bun/bin:$PATH"
+# Also scan for opencode in common locations
+for _dir in "$HOME/.bun/bin" /usr/local/bin; do
+    if [ -x "$_dir/opencode" ]; then
+        export PATH="$_dir:$PATH"
+        break
+    fi
+done
 
 COMPOSE_DIR="/tmp/e2e-compose-$$"
 DOCKER_NETWORK="e2e-langfuse-net-$$"
