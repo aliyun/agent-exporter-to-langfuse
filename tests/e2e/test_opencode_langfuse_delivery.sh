@@ -370,7 +370,8 @@ query_langfuse_traces() {
     local secret_key="$3"
     local name_filter="$4"
     local from_ts="$5"
-    curl -sf "${base_url}/api/public/traces?name=${name_filter}&fromTimestamp=${from_ts}&limit=10" \
+    local encoded_ts=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$from_ts")
+    curl -sf "${base_url}/api/public/traces?name=${name_filter}&fromTimestamp=${encoded_ts}&limit=10" \
         -u "${public_key}:${secret_key}" 2>/dev/null || echo '{"data":[]}'
 }
 
