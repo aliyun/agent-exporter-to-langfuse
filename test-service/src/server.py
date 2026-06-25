@@ -99,17 +99,17 @@ def create_app(config: Config, store: Store | None = None,
 
     @app.get("/e2e/jobs/{job_id}/logs")
     async def get_logs(job_id: str) -> PlainTextResponse:
-        s = _get_store()
-        job = s.get_job(job_id)
-        if job is None:
-            return PlainTextResponse("job not found", status_code=404)
-
         base_log_dir = Path(config.storage.log_dir).resolve()
         log_path = (base_log_dir / f"{job_id}.log").resolve()
         try:
             log_path.relative_to(base_log_dir)
         except ValueError:
             return PlainTextResponse("invalid job id", status_code=400)
+
+        s = _get_store()
+        job = s.get_job(job_id)
+        if job is None:
+            return PlainTextResponse("job not found", status_code=404)
 
         if not log_path.exists():
             return PlainTextResponse("", status_code=200)
