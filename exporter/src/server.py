@@ -164,8 +164,8 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
                     status_code=500,
                 )
             return JSONResponse({"status": "started", "scope": agent or "all"})
-        except Exception:
-            logger.exception("retry-hooks internal error")
+        except Exception as e:
+            logger.exception("retry-hooks internal error: %s", e)
             return JSONResponse(
                 {"status": "error", "message": "internal error"}, status_code=500
             )
