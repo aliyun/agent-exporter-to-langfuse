@@ -159,6 +159,30 @@ list_known_agents() {
     fi
 }
 
+is_agent_installed() {
+    local agent="$1"
+    case "$agent" in
+        claude-code)
+            [ -d "$HOME/.claude" ] || command -v claude &>/dev/null
+            ;;
+        codex)
+            [ -d "$HOME/.codex" ] || command -v codex &>/dev/null
+            ;;
+        opencode)
+            [ -d "$HOME/.config/opencode" ] || command -v opencode &>/dev/null
+            ;;
+        qoder)
+            [ -d "$HOME/.qoder" ] || command -v qoder &>/dev/null || command -v qodercli &>/dev/null
+            ;;
+        qoderwork)
+            [ -d "$HOME/.qoderwork" ]
+            ;;
+        *)
+            false
+            ;;
+    esac
+}
+
 install_detected_hooks() {
     local ver_dir="$1"
     local agents
@@ -168,6 +192,10 @@ install_detected_hooks() {
     fi
     info "Installing hooks for detected agents ..."
     for agent in $agents; do
+        if ! is_agent_installed "$agent"; then
+            info "Skipping $agent (not installed)"
+            continue
+        fi
         local script="$ver_dir/hooks/$agent/install.sh"
         if [ -f "$script" ]; then
             info "Installing hook: $agent"
