@@ -1,4 +1,5 @@
 import logging
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -98,24 +99,38 @@ class GitManager:
             raise MergeConflictError(conflict_files)
 
     def remove_worktree(self, job_id: str) -> None:
-        worktree_path = self._worktree_dir / job_id
-        if worktree_path.exists():
-            self._run_git(
-                ["worktree", "remove", str(worktree_path), "--force"],
-                cwd=self._local_repo,
-            )
+        self._remove_worktree_best_effort(self._worktree_dir / job_id)
 
     def cleanup_all_worktrees(self) -> None:
         if self._worktree_dir.exists():
             for child in self._worktree_dir.iterdir():
                 if child.is_dir():
-                    try:
-                        self._run_git(
-                            ["worktree", "remove", str(child), "--force"],
-                            cwd=self._local_repo,
-                        )
-                    except Exception:
-                        logger.warning("failed to remove worktree %s", child)
+                    self._remove_worktree_best_effort(child)
+
+    def _remove_worktree_best_effort(self, worktree_path: Path) -> None:
+        """Remove a worktree directory and prune its registration without raising.
+
+        ``git worktree remove`` only accepts a single boolean ``--force``; it
+        returns non-zero (e.g. 255) when the tree holds a ``.venv``, is locked,
+        or has files held open by a process. In that case fall back to an
+        ``rmtree`` of the directory, then ``worktree prune`` so the bare repo's
+        dangling registration entry is cleaned up (prune only removes entries
+        whose directory is already gone, so it must run after ``rmtree``).
+        """
+        if worktree_path.exists():
+            try:
+                self._run_git(
+                    ["worktree", "remove", str(worktree_path), "--force"],
+                    cwd=self._local_repo,
+                )
+            except Exception as e:
+                logger.warning("git worktree remove --force failed for %s: %s", worktree_path, e)
+            if worktree_path.exists():
+                shutil.rmtree(worktree_path, ignore_errors=True)
+        try:
+            self._run_git(["worktree", "prune"], cwd=self._local_repo)
+        except Exception as e:
+            logger.warning("git worktree prune failed: %s", e)
 
     def _get_conflict_files(self, worktree_path: Path) -> list[str]:
         try:

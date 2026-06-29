@@ -1,3 +1,7 @@
+import asyncio
+import os
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -141,3 +145,47 @@ def test_metadata_roundtrip(setup):
 
     get_resp = client.get(f"/e2e/jobs/{job_id}")
     assert get_resp.json()["metadata"] == meta
+
+
+def test_get_logs_path_traversal(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    log_dir = str(tmp_path / "logs")
+    config = Config()
+    config.storage.log_dir = log_dir
+    config.e2e = E2EConfig(same_branch_policy="replace")
+    store = Store(db_path, log_dir)
+    queue = JobQueue(same_branch_policy="replace")
+    app = create_app(config, store=store, queue=queue)
+
+    handler = next(
+        r.endpoint for r in app.routes
+        if hasattr(r, "path") and r.path == "/e2e/jobs/{job_id}/logs"
+    )
+    result = asyncio.run(handler("../../secret"))
+    assert result.status_code == 400
+    assert result.body.decode() == "invalid job id"
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "symlink") or os.name == "nt",
+    reason="symlink not available on this platform",
+)
+def test_get_logs_symlink_outside_base(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    log_dir = tmp_path / "logs"
+    config = Config()
+    config.storage.log_dir = str(log_dir)
+    config.e2e = E2EConfig(same_branch_policy="replace")
+    store = Store(db_path, str(log_dir))
+    queue = JobQueue(same_branch_policy="replace")
+    app = create_app(config, store=store, queue=queue)
+    client = TestClient(app)
+
+    secret_path = tmp_path / "secret.txt"
+    secret_path.write_text("sensitive data")
+    symlink_path = log_dir / "evil.log"
+    os.symlink(str(secret_path), str(symlink_path))
+
+    resp = client.get("/e2e/jobs/evil/logs")
+    assert resp.status_code == 400
+    assert resp.text == "invalid job id"
