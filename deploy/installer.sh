@@ -310,6 +310,7 @@ cmd_install() {
             }
             info "Latest version: $version"
         fi
+        version="${version#v}"
         tarball_url="https://github.com/${DEFAULT_REPO}/releases/download/v${version}/agent-exporter-to-langfuse-${version}.tar.gz"
         sums_url="https://github.com/${DEFAULT_REPO}/releases/download/v${version}/SHA256SUMS"
     fi
@@ -554,10 +555,21 @@ cmd_upgrade() {
             sums_url="${base_dir}/SHA256SUMS"
         fi
     else
-        if [ -z "$version" ]; then
-            error "Must specify --version or --package-url for upgrade"
-            exit 1
+        if [ -z "$version" ] || [ "$version" = "latest" ]; then
+            info "Querying latest release version ..."
+            local api_url="https://api.github.com/repos/${DEFAULT_REPO}/releases?per_page=1"
+            local release_json
+            release_json="$(curl -fsSL "$api_url")" || {
+                error "Failed to query GitHub releases API"
+                exit 1
+            }
+            version="$(echo "$release_json" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['tag_name'].lstrip('v'))")" || {
+                error "No releases found for ${DEFAULT_REPO}"
+                exit 1
+            }
+            info "Latest version: $version"
         fi
+        version="${version#v}"
         tarball_url="https://github.com/${DEFAULT_REPO}/releases/download/v${version}/agent-exporter-to-langfuse-${version}.tar.gz"
         sums_url="https://github.com/${DEFAULT_REPO}/releases/download/v${version}/SHA256SUMS"
     fi

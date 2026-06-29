@@ -27,7 +27,7 @@ VERSION="$(cat "$REPO_ROOT/VERSION" | tr -d '[:space:]')"
 echo "Package: $TARBALL (v$VERSION)"
 echo ""
 
-e2e_suite "versioned-upgrade" 40
+e2e_suite "versioned-upgrade" 43
 
 # ============================================================
 e2e_case "E2E-1: Fresh install"
@@ -228,6 +228,70 @@ CLI_HELP=$(cd "$REPO_ROOT/exporter" && uv run langstash --help 2>&1 || true)
 for cmd in run start stop restart status upgrade rollback uninstall; do
     if echo "$CLI_HELP" | grep -q "$cmd"; then e2e_pass "CLI shows $cmd subcommand"; else e2e_fail "CLI shows $cmd subcommand"; fi
 done
+
+# ============================================================
+e2e_case "E2E-12: cmd_install --version with v-prefix"
+_TRACE_FILE="/tmp/e2e-trace-12-$$"
+bash -x "$REPO_ROOT/deploy/installer.sh" install \
+    --version v0.9.9 >"$_TRACE_FILE" 2>&1 || true
+URL_LINE=$(grep 'tarball_url=.*https' "$_TRACE_FILE" | grep -v 'local ' | head -1)
+if echo "$URL_LINE" | grep -q '/download/v0.9.9/agent-exporter-to-langfuse-0.9.9'; then
+    e2e_pass "v-prefix stripped in cmd_install URL"
+else
+    e2e_fail "v-prefix stripped in cmd_install URL (got: $URL_LINE)"
+fi
+if echo "$URL_LINE" | grep -q 'vv0'; then
+    e2e_fail "no double-v in cmd_install URL"
+else
+    e2e_pass "no double-v in cmd_install URL"
+fi
+rm -f "$_TRACE_FILE"
+
+# ============================================================
+e2e_case "E2E-13: cmd_upgrade --version with v-prefix"
+mkdir -p "$INSTALL_DIR/versions" "$INSTALL_DIR"
+echo "0.1.0" > "$INSTALL_DIR/current"
+_TRACE_FILE="/tmp/e2e-trace-13-$$"
+bash -x "$REPO_ROOT/deploy/installer.sh" upgrade \
+    --version v0.9.9 >"$_TRACE_FILE" 2>&1 || true
+URL_LINE=$(grep 'tarball_url=.*https' "$_TRACE_FILE" | grep -v 'local ' | head -1)
+if echo "$URL_LINE" | grep -q '/download/v0.9.9/agent-exporter-to-langfuse-0.9.9'; then
+    e2e_pass "v-prefix stripped in cmd_upgrade URL"
+else
+    e2e_fail "v-prefix stripped in cmd_upgrade URL (got: $URL_LINE)"
+fi
+if echo "$URL_LINE" | grep -q 'vv0'; then
+    e2e_fail "no double-v in cmd_upgrade URL"
+else
+    e2e_pass "no double-v in cmd_upgrade URL"
+fi
+rm -rf "$INSTALL_DIR/versions" "$INSTALL_DIR/current" "$_TRACE_FILE"
+
+# ============================================================
+e2e_case "E2E-14: cmd_upgrade auto-query via GitHub API"
+mkdir -p "$INSTALL_DIR/versions" "$INSTALL_DIR"
+echo "0.1.0" > "$INSTALL_DIR/current"
+MOCK_DIR="/tmp/e2e-mock-curl-$$"
+mkdir -p "$MOCK_DIR"
+cat > "$MOCK_DIR/curl" <<'MOCKEOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"api.github.com/repos"*"/releases"* ]]; then
+    echo '[{"tag_name":"v0.9.9"}]'
+    exit 0
+fi
+exec /usr/bin/curl "$@"
+MOCKEOF
+chmod +x "$MOCK_DIR/curl"
+_TRACE_FILE="/tmp/e2e-trace-14-$$"
+PATH="$MOCK_DIR:$PATH" bash -x "$REPO_ROOT/deploy/installer.sh" upgrade \
+    >"$_TRACE_FILE" 2>&1 || true
+URL_LINE=$(grep 'tarball_url=.*https' "$_TRACE_FILE" | grep -v 'local ' | head -1)
+if echo "$URL_LINE" | grep -q '/download/v0.9.9/'; then
+    e2e_pass "auto-query URL correct in cmd_upgrade"
+else
+    e2e_fail "auto-query URL correct in cmd_upgrade (got: $URL_LINE)"
+fi
+rm -rf "$MOCK_DIR" "$INSTALL_DIR/versions" "$INSTALL_DIR/current" "$_TRACE_FILE"
 
 # ============================================================
 # Cleanup
