@@ -275,6 +275,10 @@ MOCK_DIR="/tmp/e2e-mock-curl-$$"
 mkdir -p "$MOCK_DIR"
 cat > "$MOCK_DIR/curl" <<'MOCKEOF'
 #!/usr/bin/env bash
+if [[ "$*" == *"releases/latest"* ]]; then
+    echo "curl: (6) Could not resolve host" >&2
+    exit 6
+fi
 if [[ "$*" == *"api.github.com/repos"*"/releases"* ]]; then
     echo '[{"tag_name":"v0.9.9"}]'
     exit 0
