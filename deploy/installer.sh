@@ -244,6 +244,36 @@ wait_health() {
 }
 
 # ============================================================
+# PATH enhancement for daemon environments
+# ============================================================
+
+enhance_path_for_daemon() {
+    local dir=""
+
+    local nvm_latest=""
+    for dir in "$HOME/.nvm/versions/node"/*/bin; do
+        [ -d "$dir" ] || continue
+        nvm_latest="$dir"
+    done
+    if [ -n "$nvm_latest" ]; then
+        case ":$PATH:" in *":$nvm_latest:"*) ;; *) PATH="${PATH}:${nvm_latest}" ;; esac
+    fi
+
+    for dir in \
+        "$HOME/.volta/bin" \
+        "$HOME/.fnm/aliases/default/bin" \
+        "$HOME/.local/bin" \
+        "/usr/local/bin" \
+        "/opt/homebrew/bin" \
+        "$HOME/.bun/bin" \
+        "$HOME/.cargo/bin"; do
+        if [ -d "$dir" ]; then
+            case ":$PATH:" in *":$dir:"*) ;; *) PATH="${PATH}:${dir}" ;; esac
+        fi
+    done
+}
+
+# ============================================================
 # install subcommand
 # ============================================================
 
@@ -1026,6 +1056,8 @@ if [ $# -eq 0 ]; then
 fi
 
 COMMAND="$1"; shift
+
+enhance_path_for_daemon
 
 case "$COMMAND" in
     install)   cmd_install "$@" ;;
