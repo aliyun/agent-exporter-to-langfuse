@@ -64,7 +64,7 @@ langstash-tester restart
 
 ```bash
 langstash-tester status
-# langstash-tester v0.1.0-alpha.6
+# langstash-tester v0.1.0-beta.1
 # Status: ok
 ```
 
