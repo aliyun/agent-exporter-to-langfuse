@@ -90,6 +90,53 @@ download_file() {
     fi
 }
 
+resolve_latest_version() {
+    local redirect_url="https://github.com/${DEFAULT_REPO}/releases/latest"
+    local tag="" redirect_error="" api_error=""
+
+    if command -v curl &>/dev/null; then
+        tag="$(curl -sIL "$redirect_url" 2>/dev/null | grep "^location:" | tail -1 | sed 's/.*\///')" && redirect_error="" || redirect_error="curl redirect failed (exit $?)"
+    elif command -v wget &>/dev/null; then
+        tag="$(wget -S --max-redirect=0 -O /dev/null "$redirect_url" 2>&1 | grep "^  Location:" | tail -1 | sed 's/.*\///')" && redirect_error="" || redirect_error="wget redirect failed (exit $?)"
+    else
+        error "Neither curl nor wget found"
+        exit 1
+    fi
+
+    tag="$(echo "$tag" | tr -d '[:space:]')"
+    if [ -z "$tag" ] || [ "$tag" = "$redirect_url" ]; then
+        redirect_error="no tag extracted from redirect"
+    fi
+
+    if [ -n "$redirect_error" ]; then
+        warn "302 redirect failed: $redirect_error — falling back to REST API" >&2
+        local api_url="https://api.github.com/repos/${DEFAULT_REPO}/releases?per_page=1"
+        local release_json
+        if command -v curl &>/dev/null; then
+            release_json="$(curl -fsSL "$api_url" 2>&1)" && api_error="" || api_error="curl REST API failed (exit $?)"
+        else
+            release_json="$(wget -qO- "$api_url" 2>&1)" && api_error="" || api_error="wget REST API failed (exit $?)"
+        fi
+        if [ -n "$api_error" ]; then
+            error "Failed to resolve latest version"
+            error "  302 redirect: $redirect_error"
+            error "  REST API: $api_error"
+            exit 1
+        fi
+        tag="$(echo "$release_json" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['tag_name'].lstrip('v'))")" || {
+            error "Failed to resolve latest version"
+            error "  302 redirect: $redirect_error"
+            error "  REST API: no releases found for ${DEFAULT_REPO}"
+            exit 1
+        }
+    else
+        tag="${tag#v}"
+        info "Latest version (via 302 redirect): $tag" >&2
+    fi
+
+    echo "$tag"
+}
+
 get_version_dir() {
     echo "$INSTALL_DIR/versions/$1"
 }
@@ -328,17 +375,7 @@ cmd_install() {
     else
         if [ -z "$version" ] || [ "$version" = "latest" ]; then
             info "Querying latest release version ..."
-            local api_url="https://api.github.com/repos/${DEFAULT_REPO}/releases?per_page=1"
-            local release_json
-            release_json="$(curl -fsSL "$api_url")" || {
-                error "Failed to query GitHub releases API"
-                exit 1
-            }
-            version="$(echo "$release_json" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['tag_name'].lstrip('v'))")" || {
-                error "No releases found for ${DEFAULT_REPO}"
-                exit 1
-            }
-            info "Latest version: $version"
+            version="$(resolve_latest_version)"
         fi
         version="${version#v}"
         tarball_url="https://github.com/${DEFAULT_REPO}/releases/download/v${version}/agent-exporter-to-langfuse-${version}.tar.gz"
@@ -356,7 +393,15 @@ cmd_install() {
     info "Downloading package ..."
     local tarball_file="$tmp_dir/$tarball_basename"
     local sums_file="$tmp_dir/SHA256SUMS"
-    download_file "$tarball_url" "$tarball_file"
+    if ! download_file "$tarball_url" "$tarball_file"; then
+        if [[ "$tarball_url" == https://github.com/*/releases/download/* ]]; then
+            error "Failed to download release tarball for v${version}"
+            error "This version may not have a release yet. Try specifying --version <version>"
+        else
+            error "Failed to download package from $tarball_url"
+        fi
+        exit 1
+    fi
 
     # SHA-256 verification: fail-closed for remote URLs, warn for file://
     if [ "$skip_verify" = true ]; then
@@ -587,17 +632,7 @@ cmd_upgrade() {
     else
         if [ -z "$version" ] || [ "$version" = "latest" ]; then
             info "Querying latest release version ..."
-            local api_url="https://api.github.com/repos/${DEFAULT_REPO}/releases?per_page=1"
-            local release_json
-            release_json="$(curl -fsSL "$api_url")" || {
-                error "Failed to query GitHub releases API"
-                exit 1
-            }
-            version="$(echo "$release_json" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['tag_name'].lstrip('v'))")" || {
-                error "No releases found for ${DEFAULT_REPO}"
-                exit 1
-            }
-            info "Latest version: $version"
+            version="$(resolve_latest_version)"
         fi
         version="${version#v}"
         tarball_url="https://github.com/${DEFAULT_REPO}/releases/download/v${version}/agent-exporter-to-langfuse-${version}.tar.gz"
@@ -620,7 +655,15 @@ cmd_upgrade() {
     info "Downloading version $version ..."
     local tarball_file="$tmp_dir/$tarball_basename"
     local sums_file="$tmp_dir/SHA256SUMS"
-    download_file "$tarball_url" "$tarball_file"
+    if ! download_file "$tarball_url" "$tarball_file"; then
+        if [[ "$tarball_url" == https://github.com/*/releases/download/* ]]; then
+            error "Failed to download release tarball for v${version}"
+            error "This version may not have a release yet. Try specifying --version <version>"
+        else
+            error "Failed to download package from $tarball_url"
+        fi
+        exit 1
+    fi
 
     # SHA-256 verification: fail-closed for remote URLs, warn for file://
     if [ "$skip_verify" = true ]; then
