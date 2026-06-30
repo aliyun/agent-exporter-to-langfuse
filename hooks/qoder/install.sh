@@ -26,6 +26,7 @@ LANGFUSE_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}"
 LANGFUSE_BASE_URL="${LANGFUSE_BASE_URL:-}"
 LANGFUSE_USER_ID="${LANGFUSE_USER_ID:-}"
 LANGFUSE_TAGS="${LANGFUSE_TAGS:-}"
+UPGRADE_MODE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -34,6 +35,7 @@ while [[ $# -gt 0 ]]; do
         --base-url)    LANGFUSE_BASE_URL="$2"; shift 2 ;;
         --user-id)     LANGFUSE_USER_ID="$2"; shift 2 ;;
         --tags)        LANGFUSE_TAGS="$2"; shift 2 ;;
+        --upgrade)     UPGRADE_MODE=true; shift ;;
         *) shift ;;
     esac
 done
@@ -54,6 +56,68 @@ LANGFUSE_ENV_FILE="$LANGFUSE_PROFILE_DIR/qoder.env"
 
 if [ -n "$LANGFUSE_SECRET_KEY" ] && [ -n "$LANGFUSE_PUBLIC_KEY" ] && [ -n "$LANGFUSE_BASE_URL" ]; then
     :
+elif [ "$UPGRADE_MODE" = true ] && [ -f "$LANGFUSE_ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$LANGFUSE_ENV_FILE"
+    if [ -n "$LANGFUSE_SECRET_KEY" ] && [ -n "$LANGFUSE_PUBLIC_KEY" ] && [ -n "$LANGFUSE_BASE_URL" ]; then
+        info "Upgrade mode: loaded credentials from $LANGFUSE_ENV_FILE"
+    else
+        echo ""
+        echo "=== Langfuse Configuration ==="
+        echo "Enter your Langfuse credentials (get them from Langfuse project settings → API Keys)."
+        echo ""
+
+        DEFAULT_BASE_URL="${LANGFUSE_BASE_URL:-https://us.cloud.langfuse.com}"
+        DEFAULT_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}"
+        DEFAULT_SECRET_KEY="${LANGFUSE_SECRET_KEY:-}"
+
+        if [ -n "$DEFAULT_BASE_URL" ]; then
+            prompt_input "Langfuse Base URL [$DEFAULT_BASE_URL]: "
+        else
+            prompt_input "Langfuse Base URL: "
+        fi
+        read -r INPUT_BASE_URL
+        LANGFUSE_BASE_URL="${INPUT_BASE_URL:-$DEFAULT_BASE_URL}"
+
+        if [ -n "$DEFAULT_PUBLIC_KEY" ]; then
+            prompt_input "Langfuse Public Key [${DEFAULT_PUBLIC_KEY:0:12}...]: "
+        else
+            prompt_input "Langfuse Public Key (pk-lf-...): "
+        fi
+        read -r INPUT_PUBLIC_KEY
+        LANGFUSE_PUBLIC_KEY="${INPUT_PUBLIC_KEY:-$DEFAULT_PUBLIC_KEY}"
+
+        if [ -n "$DEFAULT_SECRET_KEY" ]; then
+            prompt_input "Langfuse Secret Key [${DEFAULT_SECRET_KEY:0:12}...]: "
+        else
+            prompt_input "Langfuse Secret Key (sk-lf-...): "
+        fi
+        read -r INPUT_SECRET_KEY
+        LANGFUSE_SECRET_KEY="${INPUT_SECRET_KEY:-$DEFAULT_SECRET_KEY}"
+
+        if [ -z "$LANGFUSE_PUBLIC_KEY" ] || [ -z "$LANGFUSE_SECRET_KEY" ]; then
+            error "Public Key and Secret Key are required."
+            exit 1
+        fi
+
+        if [ -n "$LANGFUSE_USER_ID" ]; then
+            prompt_input "Langfuse User ID [$LANGFUSE_USER_ID]: "
+        else
+            prompt_input "Langfuse User ID [default: OS username]: "
+        fi
+        read -r INPUT_USER_ID
+        LANGFUSE_USER_ID="${INPUT_USER_ID:-$LANGFUSE_USER_ID}"
+
+        if [ -n "$LANGFUSE_TAGS" ]; then
+            prompt_input "Extra Tags [$LANGFUSE_TAGS]: "
+        else
+            prompt_input "Extra Tags (e.g. team:olap,env:prod) [none]: "
+        fi
+        read -r INPUT_TAGS
+        LANGFUSE_TAGS="${INPUT_TAGS:-$LANGFUSE_TAGS}"
+
+        echo ""
+    fi
 else
     # Load existing env file so previous values become defaults
     if [ -f "$LANGFUSE_ENV_FILE" ]; then
@@ -114,9 +178,9 @@ else
     fi
     read -r INPUT_TAGS
     LANGFUSE_TAGS="${INPUT_TAGS:-$LANGFUSE_TAGS}"
-fi
 
-echo ""
+    echo ""
+fi
 
 # --- 3. Install hook script ---
 LANGSTASH_SRC="$SCRIPT_DIR/../langstash-deliver/python/langstash_deliver"

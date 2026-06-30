@@ -22,6 +22,14 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 
+PURGE=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --purge) PURGE=true; shift ;;
+        *) shift ;;
+    esac
+done
+
 echo "=== Uninstall OpenCode Langfuse Exporter ==="
 echo ""
 
@@ -73,11 +81,15 @@ if [ -d "$DELIVER_DIR" ]; then
 fi
 
 # --- 3. Remove env file ---
-if [ -f "$LANGFUSE_ENV_FILE" ]; then
-    rm -f "$LANGFUSE_ENV_FILE"
-    info "Removed env file: $LANGFUSE_ENV_FILE"
+if [ "$PURGE" = true ]; then
+    if [ -f "$LANGFUSE_ENV_FILE" ]; then
+        rm -f "$LANGFUSE_ENV_FILE"
+        info "Removed env file: $LANGFUSE_ENV_FILE"
+    else
+        warn "Env file not found, skipping: $LANGFUSE_ENV_FILE"
+    fi
 else
-    warn "Env file not found, skipping: $LANGFUSE_ENV_FILE"
+    info "Env file preserved: $LANGFUSE_ENV_FILE"
 fi
 
 # --- 4. Clean up profile.d directory if empty ---
