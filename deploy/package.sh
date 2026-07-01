@@ -76,7 +76,17 @@ find "$STAGE_TARGET" -name "*.pyc" -delete 2>/dev/null || true
 TS_DELIVER="$STAGE_TARGET/hooks/langstash-deliver/typescript"
 if [ -f "$TS_DELIVER/tsconfig.json" ]; then
     echo "Building TS langstash-deliver ..."
-    (cd "$TS_DELIVER" && npm install --ignore-scripts 2>/dev/null && npx tsc 2>/dev/null) || true
+    if (cd "$TS_DELIVER" && npm install --ignore-scripts && npm run build); then
+        :
+    else
+        rc=$?
+        echo "ERROR: langstash-deliver build failed (exit code $rc)" >&2
+        exit 1
+    fi
+    if [ ! -f "$TS_DELIVER/dist/index.js" ]; then
+        echo "ERROR: langstash-deliver build succeeded but dist/index.js not found" >&2
+        exit 1
+    fi
     rm -rf "$TS_DELIVER/node_modules"
 fi
 

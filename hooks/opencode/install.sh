@@ -215,14 +215,22 @@ else
     info "Plugin installed to $PLUGIN_DEST"
 fi
 
-if [ -d "$DELIVER_SRC" ]; then
-    mkdir -p "$DELIVER_DEST"
-    cp "$DELIVER_SRC"/index.js "$DELIVER_DEST/" 2>/dev/null || true
-    cp "$DELIVER_SRC"/index.d.ts "$DELIVER_DEST/" 2>/dev/null || true
-    info "langstash-deliver installed to $DELIVER_DEST"
-else
-    warn "langstash-deliver dist not found at $DELIVER_SRC, skipping"
+if [ ! -d "$DELIVER_SRC" ]; then
+    TS_SRC_DIR="$SCRIPT_DIR/../langstash-deliver/typescript"
+    info "langstash-deliver dist not found at $DELIVER_SRC, building on-demand..."
+    if ( cd "$TS_SRC_DIR" && npm install --ignore-scripts && npm run build ); then
+        rm -rf "$TS_SRC_DIR/node_modules"
+    else
+        build_rc=$?
+        rm -rf "$TS_SRC_DIR/node_modules"
+        error "langstash-deliver build failed (exit code: $build_rc)"
+        exit 1
+    fi
 fi
+mkdir -p "$DELIVER_DEST"
+cp "$DELIVER_SRC"/index.js "$DELIVER_DEST/" 2>/dev/null || true
+cp "$DELIVER_SRC"/index.d.ts "$DELIVER_DEST/" 2>/dev/null || true
+info "langstash-deliver installed to $DELIVER_DEST"
 
 # --- 5. Register plugin in opencode.json ---
 if [ ! -f "$OC_CONFIG_FILE" ]; then
