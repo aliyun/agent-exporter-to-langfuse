@@ -56,23 +56,6 @@ if ! command -v node &>/dev/null; then
     exit 1
 fi
 
-if ! command -v pnpm &>/dev/null; then
-    info "pnpm not found, installing via corepack ..."
-    if command -v corepack &>/dev/null; then
-        corepack enable pnpm 2>/dev/null || true
-        corepack prepare pnpm@latest --activate 2>/dev/null || true
-    fi
-    if ! command -v pnpm &>/dev/null; then
-        info "corepack unavailable, installing pnpm via npm ..."
-        npm install -g pnpm 2>&1 | tail -1
-    fi
-    if ! command -v pnpm &>/dev/null; then
-        error "Failed to install pnpm. Install it manually: https://pnpm.io/installation"
-        exit 1
-    fi
-    info "pnpm installed: $(pnpm --version)"
-fi
-
 # --- 2. Collect Langfuse credentials ---
 if [ -n "$LANGFUSE_SECRET_KEY" ] && [ -n "$LANGFUSE_PUBLIC_KEY" ] && [ -n "$LANGFUSE_BASE_URL" ]; then
     :
@@ -204,17 +187,37 @@ fi
 # --- 3. Build and install hook ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-info "Installing dependencies and building hook ..."
-(cd "$SCRIPT_DIR" && pnpm install --frozen-lockfile 2>&1 || pnpm install 2>&1) | tail -3
-(cd "$SCRIPT_DIR" && pnpm run build 2>&1) | tail -3
+# Use pre-built dist from tarball if available; otherwise fall back to npm build.
+if [ -f "$SCRIPT_DIR/dist/index.mjs" ]; then
+    info "Using pre-built dist/index.mjs, skipping build ..."
+else
+    # Fallback: build via npm. Requires langstash-deliver dist for trace.ts import.
+    LANGSTASH_DELIVER_DIST="$SCRIPT_DIR/../langstash-deliver/typescript/dist/index.js"
+    if [ ! -f "$LANGSTASH_DELIVER_DIST" ]; then
+        error "langstash-deliver dist not found at $LANGSTASH_DELIVER_DIST"
+        error "Build it first: cd hooks/langstash-deliver/typescript/ && npm install --ignore-scripts && npm run build"
+        exit 1
+    fi
 
-if [ ! -f "$SCRIPT_DIR/dist/index.mjs" ]; then
-    error "Build failed: dist/index.mjs not found"
-    exit 1
+    info "Pre-built dist not found, building via npm ..."
+    if (cd "$SCRIPT_DIR" && npm install --ignore-scripts && npm run build); then
+        :
+    else
+        build_rc=$?
+        rm -rf "$SCRIPT_DIR/node_modules"
+        error "npm install or npm run build failed (exit code $build_rc)"
+        exit 1
+    fi
+    rm -rf "$SCRIPT_DIR/node_modules"
+
+    if [ ! -f "$SCRIPT_DIR/dist/index.mjs" ]; then
+        error "Build completed but dist/index.mjs not found"
+        exit 1
+    fi
 fi
 
 mkdir -p "$LANGFUSE_HOOK_DIR/dist"
-cp "$SCRIPT_DIR/dist/index.mjs" "$LANGFUSE_HOOK_DIR/dist/"
+cp -f "$SCRIPT_DIR/dist/index.mjs" "$LANGFUSE_HOOK_DIR/dist/"
 
 info "Hook built and copied to $LANGFUSE_HOOK_DIR"
 

@@ -90,6 +90,24 @@ if [ -f "$TS_DELIVER/tsconfig.json" ]; then
     rm -rf "$TS_DELIVER/node_modules"
 fi
 
+# Pre-build codex hook so dist/index.mjs is available for install.sh
+TS_CODEX="$STAGE_TARGET/hooks/codex"
+if [ -f "$TS_CODEX/package.json" ]; then
+    echo "Building codex hook ..."
+    if (cd "$TS_CODEX" && npm install --ignore-scripts && npm run build); then
+        :
+    else
+        rc=$?
+        echo "ERROR: codex hook build failed (exit code $rc)" >&2
+        exit 1
+    fi
+    if [ ! -f "$TS_CODEX/dist/index.mjs" ]; then
+        echo "ERROR: codex hook build succeeded but dist/index.mjs not found" >&2
+        exit 1
+    fi
+    rm -rf "$TS_CODEX/node_modules"
+fi
+
 mkdir -p "$OUTPUT_DIR"
 
 (cd "$STAGING_DIR" && tar czf "$TARBALL_NAME" "agent-exporter-to-langfuse-${VERSION}")
