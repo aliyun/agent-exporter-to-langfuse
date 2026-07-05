@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -266,4 +266,4 @@ class TestRetryHooks:
         data = resp.json()
         assert data["status"] == "error", f"expected status=error, got {data['status']}"
         assert data["message"] == "internal error", f"expected message='internal error', got '{data['message']}'"
-        mock_logger.exception.assert_called_once_with("retry-hooks internal error")
+        mock_logger.exception.assert_called_once_with("retry-hooks internal error: %s", ANY)
