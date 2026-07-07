@@ -23,7 +23,20 @@ export LANGSTASH_ENABLED="false"
 # Create fake cursor home
 mkdir -p "$HOME/.cursor"
 
-# Ensure dist is built
+# Ensure langstash-deliver dist is built (required for cursor trace.ts import)
+LANGSTASH_DELIVER_DIR="$REPO_ROOT/hooks/langstash-deliver/typescript"
+if [ ! -f "$LANGSTASH_DELIVER_DIR/dist/index.js" ]; then
+    echo "Building langstash-deliver dist..."
+    (cd "$LANGSTASH_DELIVER_DIR" && npm install --ignore-scripts && npm run build) || {
+        rc=$?
+        echo "FAIL: langstash-deliver build failed (exit $rc)" >&2
+        rm -rf "$TEST_HOME"
+        exit 1
+    }
+    rm -rf "$LANGSTASH_DELIVER_DIR/node_modules"
+fi
+
+# Ensure cursor dist is built
 if [ ! -f "$HOOK_DIR/dist/index.mjs" ]; then
     echo "Building cursor hook dist..."
     (cd "$HOOK_DIR" && npm install --ignore-scripts && npm run build) || {
