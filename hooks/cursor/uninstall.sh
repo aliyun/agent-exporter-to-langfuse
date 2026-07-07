@@ -52,23 +52,30 @@ if not isinstance(hooks_data, dict):
     print('invalid')
     sys.exit(0)
 
+# Detect format: if hooks.json has a 'hooks' key that is a dict,
+# operate on the nested dict. Otherwise, operate on the top level.
+if 'hooks' in hooks_data and isinstance(hooks_data['hooks'], dict):
+    target = hooks_data['hooks']
+else:
+    target = hooks_data
+
 removed_count = 0
 empty_events = []
-for event in list(hooks_data.keys()):
-    if not isinstance(hooks_data[event], list):
+for event in list(target.keys()):
+    if not isinstance(target[event], list):
         continue
-    original = len(hooks_data[event])
-    hooks_data[event] = [
-        entry for entry in hooks_data[event]
+    original = len(target[event])
+    target[event] = [
+        entry for entry in target[event]
         if not (isinstance(entry, dict) and 'langfuse' in str(entry.get('command', '')))
     ]
-    removed_count += original - len(hooks_data[event])
-    if len(hooks_data[event]) == 0:
+    removed_count += original - len(target[event])
+    if len(target[event]) == 0:
         empty_events.append(event)
 
 # Remove empty event arrays left after removal
 for event in empty_events:
-    del hooks_data[event]
+    del target[event]
 
 if removed_count > 0:
     with open(hooks_json_path, 'w') as f:

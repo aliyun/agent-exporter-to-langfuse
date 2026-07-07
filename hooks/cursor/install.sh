@@ -197,21 +197,29 @@ if os.path.exists(hooks_json_path):
 else:
     hooks_data = {}
 
+# Detect format: if hooks.json has a 'hooks' key that is a dict,
+# Cursor is using the old nested format. Write entries under hooks_data['hooks'].
+# Otherwise, write to the top-level flat format.
+if 'hooks' in hooks_data and isinstance(hooks_data['hooks'], dict):
+    target = hooks_data['hooks']
+else:
+    target = hooks_data
+
 added_count = 0
 exists_count = 0
 for event in events:
-    if event not in hooks_data or not isinstance(hooks_data[event], list):
-        hooks_data[event] = []
+    if event not in target or not isinstance(target[event], list):
+        target[event] = []
 
     # Check if langfuse hook already exists in this event's array
     hook_exists = False
-    for entry in hooks_data[event]:
+    for entry in target[event]:
         if isinstance(entry, dict) and 'langfuse' in str(entry.get('command', '')):
             hook_exists = True
             break
 
     if not hook_exists:
-        hooks_data[event].append({
+        target[event].append({
             'command': hook_command,
             'timeout': 30
         })
