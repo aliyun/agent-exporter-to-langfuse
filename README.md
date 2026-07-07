@@ -7,7 +7,7 @@ Export AI Agent session observability data (conversation turns, model calls, too
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                      AI Agents                          │
-│  Claude Code · Qoder · QoderWork · OpenCode · Codex     │
+│  Claude Code · Qoder · QoderWork · OpenCode · Codex · Cursor │
 └────────┬────────────────────────────────────────────────┘
          │ Plugin Hook (per-agent)
          ▼
@@ -41,6 +41,7 @@ Export AI Agent session observability data (conversation turns, model calls, too
 | [QoderWork](https://qoder.com/qoderwork) | [`hooks/qoderwork/`](./hooks/qoderwork/) | Collect QoderWork session data via Plugin Hook |
 | [OpenCode](https://opencode.ai) | [`hooks/opencode/`](./hooks/opencode/) | Collect OpenCode session data via Plugin Hook |
 | [Codex](https://developers.openai.com/codex) | [`hooks/codex/`](./hooks/codex/) | Collect OpenAI Codex CLI session data via Plugin Hook |
+| [Cursor](https://cursor.com) | [`hooks/cursor/`](./hooks/cursor/) | Collect Cursor IDE Agent session data via Hooks |
 
 See the README in each directory for detailed configuration and usage instructions.
 
@@ -122,6 +123,47 @@ Swaps back to the previous version and restarts the service.
 langstash uninstall          # keep config/data/logs
 langstash uninstall --purge  # remove everything
 ```
+
+## Cursor
+
+### Prerequisites
+
+- [Cursor IDE](https://cursor.com) installed (`~/.cursor/` directory exists)
+- Node.js >= 22 installed
+- Langfuse server running (or langstash daemon on `http://127.0.0.1:5288`)
+
+### Install
+
+```bash
+bash hooks/cursor/install.sh \
+  --secret-key sk-lf-*** \
+  --public-key pk-lf-*** \
+  --base-url http://LANGFUSE_HOST:LANGFUSE_PORT \
+  --user-id YOUR_USER_ID \
+  --tags "team:my-team,env:prod"
+```
+
+This registers 11 hooks (9 Agent events + `stop` + `sessionStart`) in `~/.cursor/hooks.json` and copies the hook bundle to `~/.cursor/hooks/langfuse/dist/`. The installer resolves the absolute path to `node` so the hook command does not depend on your runtime PATH.
+
+### Hooks.json Location
+
+Cursor reads hooks from `~/.cursor/hooks.json`. The installer uses Cursor's flat-array schema:
+
+```json
+{
+  "beforeSubmitPrompt": [
+    { "command": "/usr/local/bin/node ~/.cursor/hooks/langfuse/dist/index.mjs", "timeout": 30 }
+  ]
+}
+```
+
+### Uninstall
+
+```bash
+bash hooks/cursor/uninstall.sh --purge
+```
+
+This removes all langfuse hook entries from `~/.cursor/hooks.json` (preserving your other hooks) and deletes the hook bundle and `cursor.env`.
 
 ## CLI Commands
 
