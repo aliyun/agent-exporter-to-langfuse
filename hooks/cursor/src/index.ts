@@ -1,3 +1,8 @@
+// Bootstrap: write to stderr immediately so we can tell if the hook was even invoked.
+// This fires before any imports or file I/O — if you don't see this line, Cursor
+// never called the hook command.
+process.stderr.write("[cursor-langfuse] BOOT pid=" + process.pid + " cwd=" + process.cwd() + " home=" + (process.env.HOME ?? "unset") + " node=" + process.execPath + "\n");
+
 import { getConfig } from "./config.js";
 import { handleEvent } from "./handlers.js";
 import { handleSessionStart } from "./recovery.js";
@@ -5,6 +10,9 @@ import { deleteStateFile, getStateFilePath, readStateRecords } from "./state.js"
 import { deliverTurn, type DeliverFn } from "./trace.js";
 import { splitTurns } from "./turns.js";
 import type { CursorHookPayload } from "./types.js";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { error, info, loadEnvFile, readStdin, setDebug } from "./utils.js";
 
 /** stdout JSON returned on fail-open for non-stop hooks. */
@@ -91,6 +99,14 @@ async function handleStop(
  */
 async function runHook(): Promise<void> {
   loadEnvFile();
+
+  // Bootstrap diagnostics: check critical paths
+  const envFile = join(homedir(), ".agent-exporter-to-langfuse", "config", "cursor.env");
+  process.stderr.write("[cursor-langfuse] envFile=" + envFile + " exists=" + (existsSync(envFile) ? "Y" : "N") + "\n");
+  process.stderr.write("[cursor-langfuse] LANGFUSE_PUBLIC_KEY=" + (process.env.LANGFUSE_PUBLIC_KEY ? "set" : "MISSING") + "\n");
+  process.stderr.write("[cursor-langfuse] LANGFUSE_SECRET_KEY=" + (process.env.LANGFUSE_SECRET_KEY ? "set" : "MISSING") + "\n");
+  process.stderr.write("[cursor-langfuse] LANGFUSE_BASE_URL=" + (process.env.LANGFUSE_BASE_URL ?? "MISSING") + "\n");
+
   info("cursor langfuse hook started");
 
   let payload: CursorHookPayload;
