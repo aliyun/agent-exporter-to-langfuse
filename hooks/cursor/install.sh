@@ -176,7 +176,7 @@ info "Hook built and copied to $LANGFUSE_HOOK_DIR"
 # --- 4. Register hooks in ~/.cursor/hooks.json (flat-array schema) ---
 # Resolve node absolute path so the hook command does not depend on runtime PATH
 NODE_PATH="$(command -v node)"
-HOOK_COMMAND="\"$NODE_PATH\" \"\$HOME/.cursor/hooks/langfuse/dist/index.mjs\""
+HOOK_COMMAND="$NODE_PATH $HOME/.cursor/hooks/langfuse/dist/index.mjs"
 
 # 11 events: 9 Agent events + stop + sessionStart
 HOOK_EVENTS="beforeSubmitPrompt,afterAgentResponse,afterAgentThought,beforeShellExecution,afterShellExecution,beforeMCPExecution,afterMCPExecution,beforeReadFile,afterFileEdit,stop,sessionStart"
