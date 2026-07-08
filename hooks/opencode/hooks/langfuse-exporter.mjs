@@ -210,7 +210,7 @@ const buildOtlpJson = (langfuseSessionID, sessionID, turnNum, userText, assistan
   const genAttrs = [
     { key: 'langfuse.observation.type', value: { stringValue: 'generation' } },
     { key: 'langfuse.observation.name', value: { stringValue: 'Generation' } },
-    { key: 'langfuse.observation.model', value: { stringValue: modelName } },
+    { key: 'langfuse.observation.model.name', value: { stringValue: modelName } },
     { key: 'langfuse.observation.input', value: { stringValue: JSON.stringify({ role: 'user', content: userText }) } },
     { key: 'langfuse.observation.output', value: { stringValue: JSON.stringify(genOutput) } },
     { key: 'langfuse.observation.metadata', value: { stringValue: JSON.stringify(meta) } },
