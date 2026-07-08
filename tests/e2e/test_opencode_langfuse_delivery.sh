@@ -359,7 +359,7 @@ body = {
                     'endTimeUnixNano': str(int(now_ns) + 500000000),
                     'attributes': [
                         {'key': 'langfuse.observation.type', 'value': {'stringValue': 'GENERATION'}},
-                        {'key': 'langfuse.observation.model', 'value': {'stringValue': model}},
+                        {'key': 'langfuse.observation.model.name', 'value': {'stringValue': model}},
                         {'key': 'langfuse.observation.input', 'value': {'stringValue': 'e2e-test-input'}},
                         {'key': 'langfuse.observation.output', 'value': {'stringValue': 'e2e-test-output'}},
                     ]
@@ -412,19 +412,22 @@ except:
     print('parse_fail')
     sys.exit(1)
 traces = data.get('data', [])
+observed_models = []
 for t in traces:
     tid = t.get('id', '')
-    import urllib.request, base64
+    import urllib.request, urllib.error, base64
     creds = base64.b64encode(f'{public_key}:{secret_key}'.encode()).decode()
     url = f'{base_url}/api/public/observations?traceId={tid}&limit=10&fields=core,basic,usage'
     req = urllib.request.Request(url, headers={'Authorization': f'Basic {creds}'})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             obs_data = json.loads(resp.read())
-    except:
+    except (urllib.error.URLError, json.JSONDecodeError) as e:
+        print(f'api_error: trace={tid} {type(e).__name__}: {e}', file=sys.stderr)
         continue
     for o in obs_data.get('data', []):
-        model = (o.get('metadata', {}).get('attributes', {}) or {}).get('langfuse.observation.model', '') or o.get('model', '') or ''
+        model = o.get('model', '') or ''
+        observed_models.append(model)
         input_val = str(o.get('input', '')) or ''
         if exp_model and exp_model in model:
             if not exp_input or exp_input in input_val:
@@ -434,6 +437,7 @@ for t in traces:
             if not exp_input or exp_input in input_val:
                 print('match')
                 sys.exit(0)
+print(f'no_match: expected_model={exp_model} expected_input={exp_input} observed_models={observed_models}', file=sys.stderr)
 print('no_match')
 " "$traces_json" "$base_url" "$public_key" "$secret_key" "$expected_model" "$expected_input"
 }
