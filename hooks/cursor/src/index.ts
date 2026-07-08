@@ -112,9 +112,9 @@ async function runHook(): Promise<void> {
   let payload: CursorHookPayload;
   try {
     payload = await readStdin<CursorHookPayload>();
+    info(`stdin parsed: hook_event_name=${payload.hook_event_name} conversation_id=${payload.conversation_id}`);
   } catch (e) {
     error("failed to read hook stdin:", e);
-    // Cannot determine event name — use event fail-open
     emitStdout(undefined);
     return;
   }
@@ -132,11 +132,15 @@ async function runHook(): Promise<void> {
 
   try {
     if (isStopEvent(eventName)) {
+      info(`dispatching stop for conversation_id=${payload.conversation_id}`);
       await handleStop(payload, config);
     } else if (eventName === "sessionStart") {
+      info(`dispatching sessionStart for conversation_id=${payload.conversation_id}`);
       await handleSessionStart(payload, config);
     } else if (eventName) {
+      info(`dispatching event ${eventName} for conversation_id=${payload.conversation_id}`);
       handleEvent(payload, config);
+      info(`event ${eventName} recorded`);
     } else {
       info("hook payload missing hook_event_name, skipping");
     }
