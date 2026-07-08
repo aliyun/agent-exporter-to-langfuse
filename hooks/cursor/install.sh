@@ -197,35 +197,35 @@ if os.path.exists(hooks_json_path):
 else:
     hooks_data = {}
 
-# Detect format: if hooks.json has a 'hooks' key that is a dict,
-# Cursor is using the old nested format. Write entries under hooks_data['hooks'].
-# Otherwise, write to the top-level flat format.
+# Write to BOTH the top-level and the hooks key (if it exists).
+# Cursor versions differ on which format they read — some read the top-level
+# flat format, others read the 'hooks' key. Writing to both ensures compatibility.
+targets = [hooks_data]
 if 'hooks' in hooks_data and isinstance(hooks_data['hooks'], dict):
-    target = hooks_data['hooks']
-else:
-    target = hooks_data
+    targets.append(hooks_data['hooks'])
 
 added_count = 0
 exists_count = 0
-for event in events:
-    if event not in target or not isinstance(target[event], list):
-        target[event] = []
+for target in targets:
+    for event in events:
+        if event not in target or not isinstance(target[event], list):
+            target[event] = []
 
-    # Check if langfuse hook already exists in this event's array
-    hook_exists = False
-    for entry in target[event]:
-        if isinstance(entry, dict) and 'langfuse' in str(entry.get('command', '')):
-            hook_exists = True
-            break
+        # Check if langfuse hook already exists in this event's array
+        hook_exists = False
+        for entry in target[event]:
+            if isinstance(entry, dict) and 'langfuse' in str(entry.get('command', '')):
+                hook_exists = True
+                break
 
-    if not hook_exists:
-        target[event].append({
-            'command': hook_command,
-            'timeout': 30
-        })
-        added_count += 1
-    else:
-        exists_count += 1
+        if not hook_exists:
+            target[event].append({
+                'command': hook_command,
+                'timeout': 30
+            })
+            added_count += 1
+        else:
+            exists_count += 1
 
 # Write back
 with open(hooks_json_path, 'w') as f:
