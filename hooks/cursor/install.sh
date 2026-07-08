@@ -179,7 +179,7 @@ NODE_PATH="$(command -v node)"
 HOOK_COMMAND="$NODE_PATH $HOME/.cursor/hooks/langfuse/dist/index.mjs"
 
 # 11 events: 9 Agent events + stop + sessionStart
-HOOK_EVENTS="beforeSubmitPrompt,afterAgentResponse,afterAgentThought,beforeShellExecution,afterShellExecution,beforeMCPExecution,afterMCPExecution,beforeReadFile,afterFileEdit,stop,sessionStart"
+HOOK_EVENTS="beforeSubmitPrompt,afterAgentResponse,afterAgentThought,beforeShellExecution,afterShellExecution,beforeMCPExecution,afterMCPExecution,beforeReadFile,afterFileEdit,stop,sessionStart,subagentStart,subagentStop"
 
 python3 -c "
 import json, sys, os
