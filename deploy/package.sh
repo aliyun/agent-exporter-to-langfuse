@@ -108,6 +108,24 @@ if [ -f "$TS_CODEX/package.json" ]; then
     rm -rf "$TS_CODEX/node_modules"
 fi
 
+# Pre-build cursor hook so dist/index.mjs is available for install.sh
+TS_CURSOR="$STAGE_TARGET/hooks/cursor"
+if [ -f "$TS_CURSOR/package.json" ]; then
+    echo "Building cursor hook ..."
+    if (cd "$TS_CURSOR" && npm install --ignore-scripts && npm run build); then
+        :
+    else
+        rc=$?
+        echo "ERROR: cursor hook build failed (exit code $rc)" >&2
+        exit 1
+    fi
+    if [ ! -f "$TS_CURSOR/dist/index.mjs" ]; then
+        echo "ERROR: cursor hook build succeeded but dist/index.mjs not found" >&2
+        exit 1
+    fi
+    rm -rf "$TS_CURSOR/node_modules"
+fi
+
 mkdir -p "$OUTPUT_DIR"
 
 (cd "$STAGING_DIR" && tar czf "$TARBALL_NAME" "agent-exporter-to-langfuse-${VERSION}")

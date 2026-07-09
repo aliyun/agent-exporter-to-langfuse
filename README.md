@@ -5,19 +5,19 @@ Export AI Agent session observability data (conversation turns, model calls, too
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      AI Agents                          │
-│  Claude Code · Qoder · QoderWork · OpenCode · Codex     │
-└────────┬────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                         AI Agents                             │
+│  Claude Code · Qoder · QoderWork · OpenCode · Codex · Cursor  │
+└────────┬──────────────────────────────────────────────────────┘
          │ Plugin Hook (per-agent)
          ▼
-┌─────────────────────────────────────────────────────────┐
-│                   langstash-deliver                     │
-│  Three-tier delivery:                                   │
-│    1. langstash (local buffer) ─► preferred             │
-│    2. Langfuse SDK (direct push) ─► fallback            │
-│    3. Failed log (~/.agent-exporter-to-langfuse/data/)  │
-└────────┬──────────────────────┬─────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                      langstash-deliver                        │
+│  Three-tier delivery:                                         │
+│    1. langstash (local buffer) ─► preferred                   │
+│    2. Langfuse SDK (direct push) ─► fallback                  │
+│    3. Failed log (~/.agent-exporter-to-langfuse/data/)        │
+└────────┬────────────────────────┬─────────────────────────────┘
          │ POST /ingest         │ Direct SDK push
          ▼                      ▼
 ┌──────────────────┐   ┌──────────────────┐
@@ -41,6 +41,7 @@ Export AI Agent session observability data (conversation turns, model calls, too
 | [QoderWork](https://qoder.com/qoderwork) | [`hooks/qoderwork/`](./hooks/qoderwork/) | Collect QoderWork session data via Plugin Hook |
 | [OpenCode](https://opencode.ai) | [`hooks/opencode/`](./hooks/opencode/) | Collect OpenCode session data via Plugin Hook |
 | [Codex](https://developers.openai.com/codex) | [`hooks/codex/`](./hooks/codex/) | Collect OpenAI Codex CLI session data via Plugin Hook |
+| [Cursor](https://cursor.com) | [`hooks/cursor/`](./hooks/cursor/) | Collect Cursor IDE Agent session data via Hooks |
 
 See the README in each directory for detailed configuration and usage instructions.
 

@@ -72,6 +72,15 @@ def _builtin_agent_definitions() -> list[dict[str, Any]]:
                 "markers": ["langstash-deliver", "langstash_deliver", "langfuse-entrypoint", "hooks/langfuse"],
             },
         },
+        {
+            "id": "cursor",
+            "displayName": "Cursor",
+            "detection": {"paths": [str(home / ".cursor")]},
+            "hook": {
+                "settingsPath": str(home / ".cursor" / "hooks.json"),
+                "markers": ["langfuse", "langstash-deliver"],
+            },
+        },
     ]
 
 

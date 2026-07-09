@@ -224,6 +224,9 @@ is_agent_installed() {
         qoderwork)
             [ -d "$HOME/.qoderwork" ]
             ;;
+        cursor)
+            [ -d "$HOME/.cursor" ]
+            ;;
         *)
             false
             ;;
