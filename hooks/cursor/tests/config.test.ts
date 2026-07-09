@@ -44,7 +44,7 @@ describe("getConfig", () => {
   it("reads LANGFUSE_TAGS from env and includes cursor", () => {
     vi.stubEnv("LANGFUSE_TAGS", "team:olap,env:prod");
     const config = getConfig();
-    expect(config.tags, "LANGFUSE_TAGS should be parsed as array").toEqual(["team:olap", "env:prod"]);
+    expect(config.tags, "LANGFUSE_TAGS should be parsed as array and always include cursor").toEqual(["team:olap", "env:prod", "cursor"]);
   });
 
   it("resolves user_id from LANGFUSE_USER_ID", () => {

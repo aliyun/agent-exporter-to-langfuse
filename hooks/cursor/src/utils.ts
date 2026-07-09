@@ -135,7 +135,7 @@ export function loadEnvFile(): void {
     const content = readFileSync(envFile, "utf8");
     for (const line of content.split("\n")) {
       const m = line.match(/^export\s+([A-Za-z_][A-Za-z0-9_]*)="(.*)"\s*$/);
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+      if (m) process.env[m[1]] = m[2];
     }
   } catch {
     // env file not found or unreadable — that's fine

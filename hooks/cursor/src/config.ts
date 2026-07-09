@@ -78,7 +78,7 @@ export function getConfig(env: Record<string, string | undefined> = process.env)
     secret_key: env.LANGFUSE_SECRET_KEY,
     base_url: env.LANGFUSE_BASE_URL || DEFAULTS.base_url,
     user_id: resolveUserId(env),
-    tags: parseTags(env.LANGFUSE_TAGS) ?? ["cursor"],
+    tags: [...(parseTags(env.LANGFUSE_TAGS) ?? []), "cursor"],
     max_chars: parseInteger(env.LANGFUSE_MAX_CHARS, DEFAULTS.max_chars),
     debug: parseBoolean(env.LANGFUSE_DEBUG, DEFAULTS.debug),
     fail_on_error: parseBoolean(env.LANGFUSE_CURSOR_FAIL_ON_ERROR, DEFAULTS.fail_on_error),
