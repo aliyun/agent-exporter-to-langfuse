@@ -52,31 +52,30 @@ if not isinstance(hooks_data, dict):
     print('invalid')
     sys.exit(0)
 
-# Remove langfuse entries from BOTH the top level and the hooks key
-# (if it exists). The old install.sh wrote to the top level; the new
-# install.sh writes to the hooks key when present.
-targets = [hooks_data]
+# Remove langfuse entries from the hooks key if it exists;
+# otherwise remove from the top level.
 if 'hooks' in hooks_data and isinstance(hooks_data['hooks'], dict):
-    targets.append(hooks_data['hooks'])
+    target = hooks_data['hooks']
+else:
+    target = hooks_data
 
 removed_count = 0
-for target in targets:
-    empty_events = []
-    for event in list(target.keys()):
-        if not isinstance(target[event], list):
-            continue
-        original = len(target[event])
-        target[event] = [
-            entry for entry in target[event]
-            if not (isinstance(entry, dict) and 'langfuse' in str(entry.get('command', '')))
-        ]
-        removed_count += original - len(target[event])
-        if len(target[event]) == 0:
-            empty_events.append(event)
+empty_events = []
+for event in list(target.keys()):
+    if not isinstance(target[event], list):
+        continue
+    original = len(target[event])
+    target[event] = [
+        entry for entry in target[event]
+        if not (isinstance(entry, dict) and 'langfuse' in str(entry.get('command', '')))
+    ]
+    removed_count += original - len(target[event])
+    if len(target[event]) == 0:
+        empty_events.append(event)
 
-    # Remove empty event arrays left after removal
-    for event in empty_events:
-        del target[event]
+# Remove empty event arrays left after removal
+for event in empty_events:
+    del target[event]
 
 if removed_count > 0:
     with open(hooks_json_path, 'w') as f:

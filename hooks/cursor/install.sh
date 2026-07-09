@@ -197,35 +197,34 @@ if os.path.exists(hooks_json_path):
 else:
     hooks_data = {}
 
-# Write to BOTH the top-level and the hooks key (if it exists).
-# Cursor versions differ on which format they read — some read the top-level
-# flat format, others read the 'hooks' key. Writing to both ensures compatibility.
-targets = [hooks_data]
+# Write to the hooks key if it exists; otherwise write to the top level.
+# Cursor reads from the hooks key when it is present.
 if 'hooks' in hooks_data and isinstance(hooks_data['hooks'], dict):
-    targets.append(hooks_data['hooks'])
+    target = hooks_data['hooks']
+else:
+    target = hooks_data
 
 added_count = 0
 exists_count = 0
-for target in targets:
-    for event in events:
-        if event not in target or not isinstance(target[event], list):
-            target[event] = []
+for event in events:
+    if event not in target or not isinstance(target[event], list):
+        target[event] = []
 
-        # Check if langfuse hook already exists in this event's array
-        hook_exists = False
-        for entry in target[event]:
-            if isinstance(entry, dict) and 'langfuse' in str(entry.get('command', '')):
-                hook_exists = True
-                break
+    # Check if langfuse hook already exists in this event's array
+    hook_exists = False
+    for entry in target[event]:
+        if isinstance(entry, dict) and 'langfuse' in str(entry.get('command', '')):
+            hook_exists = True
+            break
 
-        if not hook_exists:
-            target[event].append({
-                'command': hook_command,
-                'timeout': 30
-            })
-            added_count += 1
-        else:
-            exists_count += 1
+    if not hook_exists:
+        target[event].append({
+            'command': hook_command,
+            'timeout': 30
+        })
+        added_count += 1
+    else:
+        exists_count += 1
 
 # Write back
 with open(hooks_json_path, 'w') as f:
