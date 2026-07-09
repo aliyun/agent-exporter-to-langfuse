@@ -121,5 +121,6 @@ if (isMainModule) {
     try {
       process.stdout.write(FAIL_OPEN_EVENT_STDOUT);
     } catch {}
+    process.exit(0);
   });
 }

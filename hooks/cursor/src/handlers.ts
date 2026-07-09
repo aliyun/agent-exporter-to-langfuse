@@ -23,6 +23,8 @@ const EVENT_FIELDS: Record<string, string[]> = {
   afterMCPExecution: ["tool_name", "tool_input", "result_json", "duration"],
   beforeReadFile: ["file_path", "content"],
   afterFileEdit: ["file_path", "edits"],
+  subagentStart: ["subagent_id", "subagent_type", "task", "parent_conversation_id"],
+  subagentStop: ["subagent_type", "status", "task", "summary", "duration_ms", "modified_files"],
 };
 
 /**
