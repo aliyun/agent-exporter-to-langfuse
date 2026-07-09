@@ -124,10 +124,6 @@ langstash uninstall          # keep config/data/logs
 langstash uninstall --purge  # remove everything
 ```
 
-## Cursor
-
-See [`hooks/cursor/README.md`](./hooks/cursor/README.md) for installation and configuration instructions.
-
 ## CLI Commands
 
 After installation, `langstash` is available in your PATH (`~/.local/bin/langstash`):
