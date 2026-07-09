@@ -218,7 +218,7 @@ export function buildOtlpJson(
 
   rootSpan.setAttribute("langfuse.trace.name", traceName);
   rootSpan.setAttribute("session.id", turn.conversationId);
-  const userId = turn.userEmail || config.user_id;
+  const userId = config.user_id || turn.userEmail;
   if (userId) {
     rootSpan.setAttribute("user.id", userId);
   }
