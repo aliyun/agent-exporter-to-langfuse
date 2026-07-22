@@ -29,6 +29,10 @@ echo "=== hooks/codex ==="
 (cd "$SCRIPT_DIR/hooks/codex" && pnpm vitest run) || EXIT_CODE=1
 
 echo ""
+echo "=== hooks/opencode ==="
+(cd "$SCRIPT_DIR/hooks/opencode" && node --test hooks/langfuse-exporter.test.mjs) || EXIT_CODE=1
+
+echo ""
 echo "=== hooks/cursor ==="
 (cd "$SCRIPT_DIR/hooks/cursor" && npx vitest run) || EXIT_CODE=1
 
