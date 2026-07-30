@@ -159,11 +159,12 @@ const extractTools = (parts) => {
 
 const toNanoStr = (date) => String(BigInt(date.getTime()) * 1_000_000n);
 
-const buildOtlpJson = (langfuseSessionID, sessionID, turnNum, userText, assistantText, modelName,
-                        tools, usage, userTime, assistantStartTime, assistantEndTime, isSubagent, meta) => {
+export const buildOtlpJson = ({
+  langfuseSessionID, sessionID, turnNum,
+  userMsg, userParts, assistantEntries, sessionModel, isSubagent,
+}) => {
   const traceId = randomBytes(16).toString('hex');
   const rootSpanId = randomBytes(8).toString('hex');
-  const genSpanId = randomBytes(8).toString('hex');
 
   const traceName = isSubagent
     ? `OpenCode - Subagent Turn ${turnNum}`
@@ -171,16 +172,28 @@ const buildOtlpJson = (langfuseSessionID, sessionID, turnNum, userText, assistan
 
   const userId = resolveUserId();
 
-  // Root trace span attributes
+  const userTextRaw = extractText(userParts);
+  const [userText] = truncate(userTextRaw);
+
+  const userTime = userMsg?.time?.created ? new Date(userMsg.time.created) : new Date();
+
+  const lastEntry = assistantEntries[assistantEntries.length - 1] || {};
+  const lastInfo = lastEntry.info || {};
+  const lastTextRaw = extractText(lastEntry.parts || []);
+  const [lastAssistantText] = truncate(lastTextRaw);
+  const lastAssistantEndTime = lastInfo.time?.completed
+    ? new Date(lastInfo.time.completed)
+    : (lastInfo.time?.created ? new Date(lastInfo.time.created) : userTime);
+
   const rootAttrs = [
     { key: 'langfuse.trace.name', value: { stringValue: traceName } },
     { key: 'session.id', value: { stringValue: langfuseSessionID } },
     { key: 'langfuse.trace.tags', value: { stringValue: JSON.stringify(TAGS) } },
     { key: 'langfuse.trace.input', value: { stringValue: JSON.stringify({ role: 'user', content: userText }) } },
-    { key: 'langfuse.trace.output', value: { stringValue: JSON.stringify({ role: 'assistant', content: assistantText }) } },
+    { key: 'langfuse.trace.output', value: { stringValue: JSON.stringify({ role: 'assistant', content: lastAssistantText }) } },
     { key: 'langfuse.trace.metadata', value: { stringValue: JSON.stringify({
       source: 'opencode', turn_number: turnNum, is_subagent: isSubagent,
-      sessionId: sessionID, ...meta,
+      sessionId: sessionID, agent: userMsg?.agent,
     }) } },
   ];
   if (userId) {
@@ -192,84 +205,149 @@ const buildOtlpJson = (langfuseSessionID, sessionID, turnNum, userText, assistan
     spanId: rootSpanId,
     name: traceName,
     startTimeUnixNano: toNanoStr(userTime),
-    endTimeUnixNano: toNanoStr(assistantEndTime),
+    endTimeUnixNano: toNanoStr(lastAssistantEndTime),
     attributes: rootAttrs,
   };
 
-  // Generation child span
-  const genToolCalls = tools.map(tp => {
-    const state = tp.state || {};
-    const inputStr = typeof state.input === 'object' ? JSON.stringify(state.input) : String(state.input || '');
-    const [truncInput] = truncate(inputStr);
-    return { id: tp.callID, name: tp.tool, input: truncInput };
-  });
-  const genOutput = { role: 'assistant' };
-  if (assistantText) genOutput.content = assistantText;
-  if (genToolCalls.length) genOutput.tool_calls = genToolCalls;
+  const spans = [rootSpan];
 
-  const genAttrs = [
-    { key: 'langfuse.observation.type', value: { stringValue: 'generation' } },
-    { key: 'langfuse.observation.name', value: { stringValue: 'Generation' } },
-    { key: 'langfuse.observation.model.name', value: { stringValue: modelName } },
-    { key: 'langfuse.observation.input', value: { stringValue: JSON.stringify({ role: 'user', content: userText }) } },
-    { key: 'langfuse.observation.output', value: { stringValue: JSON.stringify(genOutput) } },
-    { key: 'langfuse.observation.metadata', value: { stringValue: JSON.stringify(meta) } },
-  ];
-  if (Object.keys(usage).length) {
-    genAttrs.push({ key: 'langfuse.observation.usage_details', value: { stringValue: JSON.stringify(usage) } });
-  }
+  let prevToolResults = null;
 
-  const genSpan = {
-    traceId,
-    spanId: genSpanId,
-    parentSpanId: rootSpanId,
-    name: 'Generation',
-    startTimeUnixNano: toNanoStr(assistantStartTime),
-    endTimeUnixNano: toNanoStr(assistantEndTime),
-    attributes: genAttrs,
-  };
+  for (let i = 0; i < assistantEntries.length; i++) {
+    const entry = assistantEntries[i];
+    const info = entry.info || {};
+    const parts = entry.parts || [];
 
-  // Tool child spans
-  const toolSpans = tools.filter(tp => {
-    const s = tp.state || {};
-    return !s.status || s.status === 'completed' || s.status === 'error';
-  }).map(tp => {
-    const state = tp.state || {};
-    const toolInput = state.input || {};
-    const inputStr = typeof toolInput === 'object' ? JSON.stringify(toolInput) : String(toolInput);
-    const [truncInput] = truncate(inputStr);
-    let toolOutput = state.output || state.error || '';
-    if (typeof toolOutput !== 'string') toolOutput = JSON.stringify(toolOutput);
-    const [truncOutput] = truncate(toolOutput);
+    const genSpanId = randomBytes(8).toString('hex');
 
-    const toolStart = state.time?.start ? new Date(state.time.start) : assistantStartTime;
-    const toolEnd = state.time?.end ? new Date(state.time.end) : assistantEndTime;
-    const toolSpanId = randomBytes(8).toString('hex');
+    const modelID = info.modelID || sessionModel?.modelID || 'unknown';
+    const providerID = info.providerID || sessionModel?.providerID || '';
+    const modelName = providerID ? `${providerID}/${modelID}` : modelID;
 
-    return {
-      traceId,
-      spanId: toolSpanId,
-      parentSpanId: genSpanId,
-      name: `Tool: ${tp.tool || 'unknown'}`,
-      startTimeUnixNano: toNanoStr(toolStart),
-      endTimeUnixNano: toNanoStr(toolEnd),
-      attributes: [
-        { key: 'langfuse.observation.type', value: { stringValue: 'tool' } },
-        { key: 'langfuse.observation.name', value: { stringValue: `Tool: ${tp.tool || 'unknown'}` } },
-        { key: 'langfuse.observation.input', value: { stringValue: truncInput } },
-        { key: 'langfuse.observation.output', value: { stringValue: truncOutput } },
-        { key: 'langfuse.observation.metadata', value: { stringValue: JSON.stringify({
-          tool_name: tp.tool, callID: tp.callID, status: state.status,
-        }) } },
-      ],
+    const genTextRaw = extractText(parts);
+    const [genText] = truncate(genTextRaw);
+    const msgTools = extractTools(parts);
+    const genToolCalls = msgTools.map(tp => {
+      const state = tp.state || {};
+      const inputStr = typeof state.input === 'object' ? JSON.stringify(state.input) : String(state.input || '');
+      const [truncInput] = truncate(inputStr);
+      return { id: tp.callID, name: tp.tool, input: truncInput };
+    });
+    const genOutput = { role: 'assistant' };
+    if (genText) genOutput.content = genText;
+    if (genToolCalls.length) genOutput.tool_calls = genToolCalls;
+
+    const tokens = info.tokens || {};
+    const usage = {};
+    if (tokens.input > 0) usage.input = tokens.input;
+    if (tokens.output > 0) usage.output = tokens.output;
+    const cacheRead = tokens.cache?.read;
+    const cacheWrite = tokens.cache?.write;
+    if (cacheRead > 0) usage.cache_read_input_tokens = cacheRead;
+    if (cacheWrite > 0) usage.cache_creation_input_tokens = cacheWrite;
+
+    const genMeta = {
+      toolCount: msgTools.length,
+      finish: info.finish,
+      mode: info.mode,
+      agent: userMsg?.agent,
     };
-  });
+    if (info.cost) genMeta.cost = info.cost;
+
+    const genStart = info.time?.created ? new Date(info.time.created) : userTime;
+    const genEnd = info.time?.completed ? new Date(info.time.completed) : genStart;
+
+    const genAttrs = [
+      { key: 'langfuse.observation.type', value: { stringValue: 'generation' } },
+      { key: 'langfuse.observation.name', value: { stringValue: 'Generation' } },
+      { key: 'langfuse.observation.model.name', value: { stringValue: modelName } },
+    ];
+
+    if (i === 0) {
+      genAttrs.push({ key: 'langfuse.observation.input', value: { stringValue: JSON.stringify({ role: 'user', content: userText }) } });
+    } else if (prevToolResults !== null) {
+      genAttrs.push({ key: 'langfuse.observation.input', value: { stringValue: JSON.stringify(prevToolResults) } });
+    }
+
+    genAttrs.push({ key: 'langfuse.observation.output', value: { stringValue: JSON.stringify(genOutput) } });
+    genAttrs.push({ key: 'langfuse.observation.metadata', value: { stringValue: JSON.stringify(genMeta) } });
+    if (Object.keys(usage).length) {
+      genAttrs.push({ key: 'langfuse.observation.usage_details', value: { stringValue: JSON.stringify(usage) } });
+    }
+
+    spans.push({
+      traceId,
+      spanId: genSpanId,
+      parentSpanId: rootSpanId,
+      name: 'Generation',
+      startTimeUnixNano: toNanoStr(genStart),
+      endTimeUnixNano: toNanoStr(genEnd),
+      attributes: genAttrs,
+    });
+
+    const qualifiedTools = msgTools.filter(tp => {
+      const s = tp.state || {};
+      return !s.status || s.status === 'completed' || s.status === 'error';
+    });
+    for (const tp of qualifiedTools) {
+      const state = tp.state || {};
+      const toolInput = state.input || {};
+      const inputStr = typeof toolInput === 'object' ? JSON.stringify(toolInput) : String(toolInput);
+      const [truncInput] = truncate(inputStr);
+      let toolOutput = state.output || state.error || '';
+      if (typeof toolOutput !== 'string') toolOutput = JSON.stringify(toolOutput);
+      const [truncOutput] = truncate(toolOutput);
+      const toolStart = state.time?.start ? new Date(state.time.start) : genStart;
+      const toolEnd = state.time?.end ? new Date(state.time.end) : genEnd;
+      const toolSpanId = randomBytes(8).toString('hex');
+
+      spans.push({
+        traceId,
+        spanId: toolSpanId,
+        parentSpanId: genSpanId,
+        name: `Tool: ${tp.tool || 'unknown'}`,
+        startTimeUnixNano: toNanoStr(toolStart),
+        endTimeUnixNano: toNanoStr(toolEnd),
+        attributes: [
+          { key: 'langfuse.observation.type', value: { stringValue: 'tool' } },
+          { key: 'langfuse.observation.name', value: { stringValue: `Tool: ${tp.tool || 'unknown'}` } },
+          { key: 'langfuse.observation.input', value: { stringValue: truncInput } },
+          { key: 'langfuse.observation.output', value: { stringValue: truncOutput } },
+          { key: 'langfuse.observation.metadata', value: { stringValue: JSON.stringify({
+            tool_name: tp.tool, callID: tp.callID, status: state.status,
+          }) } },
+        ],
+      });
+    }
+
+    if (qualifiedTools.length > 0) {
+      prevToolResults = qualifiedTools.map(tp => {
+        const state = tp.state || {};
+        const item = { name: tp.tool };
+        if (state.output != null) {
+          let out = state.output;
+          if (typeof out !== 'string') out = JSON.stringify(out);
+          const [truncOut] = truncate(out);
+          item.output = truncOut;
+        }
+        if (state.error != null) {
+          let err = state.error;
+          if (typeof err !== 'string') err = JSON.stringify(err);
+          const [truncErr] = truncate(err);
+          item.error = truncErr;
+        }
+        return item;
+      });
+    } else {
+      prevToolResults = null;
+    }
+  }
 
   return {
     resourceSpans: [{
       scopeSpans: [{
         scope: { name: 'agent-exporter-to-langfuse' },
-        spans: [rootSpan, genSpan, ...toolSpans],
+        spans,
       }],
     }],
   };
@@ -388,7 +466,7 @@ const _initPlugin = async (ctx) => {
         turnNum++;
         emitted++;
         try {
-          await emitTurn(langfuseSessionID, sessionID, turnNum, userEntry.info, userEntry.parts || [], assistantEntries);
+          await emitTurn(langfuseSessionID, sessionID, turnNum, userEntry.info, userEntry.parts || [], assistantEntries, sessionModels.get(sessionID));
         } catch (e) {
           await info(`emit_turn failed: ${e.message} (session=${sessionID}, turn=${turnNum})`);
         }
@@ -405,67 +483,30 @@ const _initPlugin = async (ctx) => {
 
   // ----------------- Turn emit -----------------
 
-  const emitTurn = async (langfuseSessionID, sessionID, turnNum, userMsg, userParts, assistantEntries) => {
-    const userTextRaw = extractText(userParts);
-    const [userText] = truncate(userTextRaw);
-
-    const allAssistantParts = assistantEntries.flatMap(e => e.parts || []);
-    const assistantTextRaw = extractText(allAssistantParts);
-    const [assistantText] = truncate(assistantTextRaw);
-    const tools = extractTools(allAssistantParts);
-
-    const firstAssistant = assistantEntries[0].info;
-    const lastAssistant = assistantEntries[assistantEntries.length - 1].info;
-
-    const modelID = firstAssistant.modelID || sessionModels.get(sessionID)?.modelID || 'unknown';
-    const providerID = firstAssistant.providerID || sessionModels.get(sessionID)?.providerID || '';
-    const modelName = providerID ? `${providerID}/${modelID}` : modelID;
-
-    const aggTokens = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
-    let aggCost = 0;
-    for (const e of assistantEntries) {
-      const t = e.info.tokens;
-      if (t) {
-        aggTokens.input += t.input || 0;
-        aggTokens.output += t.output || 0;
-        aggTokens.reasoning += t.reasoning || 0;
-        aggTokens.cacheRead += (t.cache?.read) || 0;
-        aggTokens.cacheWrite += (t.cache?.write) || 0;
-      }
-      aggCost += e.info.cost || 0;
-    }
-
-    const userTime = userMsg.time?.created ? new Date(userMsg.time.created) : new Date();
-    const assistantStartTime = firstAssistant.time?.created ? new Date(firstAssistant.time.created) : userTime;
-    const assistantEndTime = lastAssistant.time?.completed ? new Date(lastAssistant.time.completed) : assistantStartTime;
-
+  const emitTurn = async (langfuseSessionID, sessionID, turnNum, userMsg, userParts, assistantEntries, sessionModel) => {
     const isSubagent = langfuseSessionID !== sessionID;
 
-    if (!assistantText && tools.length === 0) {
+    const totalTools = assistantEntries.reduce(
+      (n, e) => n + extractTools(e.parts || []).length, 0);
+    const allText = assistantEntries.map(e => extractText(e.parts || [])).join('');
+    if (!allText && totalTools === 0) {
       await warn(`turn ${turnNum}: empty output (no text, no tools)`);
     }
 
-    const usage = {};
-    if (aggTokens.input > 0) usage.input = aggTokens.input;
-    if (aggTokens.output > 0) usage.output = aggTokens.output;
-    if (aggTokens.cacheRead > 0) usage.cache_read_input_tokens = aggTokens.cacheRead;
-    if (aggTokens.cacheWrite > 0) usage.cache_creation_input_tokens = aggTokens.cacheWrite;
-
-    const genMeta = {
-      toolCount: tools.length,
-      finish: lastAssistant.finish,
-      mode: firstAssistant.mode,
-      agent: userMsg.agent,
-    };
-    if (aggCost > 0) genMeta.cost = aggCost;
+    const firstInfo = assistantEntries[0].info || {};
+    const modelID = firstInfo.modelID || sessionModel?.modelID || 'unknown';
+    const providerID = firstInfo.providerID || sessionModel?.providerID || '';
+    const modelName = providerID ? `${providerID}/${modelID}` : modelID;
 
     // --- Build OTLP JSON and deliver via langstash-deliver ---
     try {
-      const otlpJson = buildOtlpJson(langfuseSessionID, sessionID, turnNum, userText, assistantText,
-        modelName, tools, usage, userTime, assistantStartTime, assistantEndTime, isSubagent, genMeta);
+      const otlpJson = buildOtlpJson({
+        langfuseSessionID, sessionID, turnNum, userMsg, userParts,
+        assistantEntries, sessionModel, isSubagent,
+      });
       const ok = await deliverTrace(otlpJson, { fetchFn: curlFetch });
       if (ok) {
-        await debug(`Delivered turn ${turnNum}: model=${modelName} tools=${tools.length} tokens=${JSON.stringify(usage)}${isSubagent ? ' (subagent)' : ''}`);
+        await debug(`Delivered turn ${turnNum}: generations=${assistantEntries.length} model=${modelName} tools=${totalTools}${isSubagent ? ' (subagent)' : ''}`);
       } else {
         await warn(`deliverTrace returned false for turn ${turnNum} (saved to failed log)`);
       }
@@ -511,5 +552,4 @@ const _initPlugin = async (ctx) => {
   };
 };
 
-export default LangfuseExporterPlugin;
-export const server = LangfuseExporterPlugin;
+export default { id: "langfuse-exporter", server: LangfuseExporterPlugin };

@@ -25,6 +25,10 @@ if [ ! -f "$LANGSTASH_DELIVER_TS/dist/index.js" ]; then
 fi
 
 echo ""
+echo "=== hooks/opencode/hooks ==="
+(cd "$SCRIPT_DIR/hooks/opencode/hooks" && node --test langfuse-exporter.test.mjs) || EXIT_CODE=1
+
+echo ""
 echo "=== hooks/codex ==="
 (cd "$SCRIPT_DIR/hooks/codex" && pnpm vitest run) || EXIT_CODE=1
 
