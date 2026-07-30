@@ -552,5 +552,4 @@ const _initPlugin = async (ctx) => {
   };
 };
 
-export default LangfuseExporterPlugin;
-export const server = LangfuseExporterPlugin;
+export default { id: "langfuse-exporter", server: LangfuseExporterPlugin };
