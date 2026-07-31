@@ -37,6 +37,10 @@ echo "=== hooks/cursor ==="
 (cd "$SCRIPT_DIR/hooks/cursor" && npx vitest run) || EXIT_CODE=1
 
 echo ""
+echo "=== hooks/pi ==="
+(cd "$SCRIPT_DIR/hooks/pi" && npx vitest run) || EXIT_CODE=1
+
+echo ""
 if [ "$EXIT_CODE" -eq 0 ]; then
     echo "All test suites passed."
 else

@@ -227,6 +227,9 @@ is_agent_installed() {
         cursor)
             [ -d "$HOME/.cursor" ]
             ;;
+        pi)
+            [ -d "$HOME/.pi" ] || command -v pi &>/dev/null
+            ;;
         *)
             false
             ;;

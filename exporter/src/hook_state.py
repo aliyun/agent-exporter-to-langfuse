@@ -81,6 +81,17 @@ def _builtin_agent_definitions() -> list[dict[str, Any]]:
                 "markers": ["langfuse", "langstash-deliver"],
             },
         },
+        {
+            "id": "pi",
+            "displayName": "Pi",
+            "detection": {"paths": [str(home / ".pi")], "commands": ["pi"]},
+            # No fileCheck on purpose: a leftover bundle must not report installed.
+            # The registration entry in settings.json is the only source of truth.
+            "hook": {
+                "settingsPath": str(home / ".pi" / "agent" / "settings.json"),
+                "markers": ["hooks/langfuse"],
+            },
+        },
     ]
 
 
