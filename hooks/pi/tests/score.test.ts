@@ -190,6 +190,99 @@ describe("score delivery", () => {
     });
   });
 
+  const makeRun = () => {
+    const run = {
+      traceId: "a".repeat(32),
+      root: { spanId: "b".repeat(16), name: "pi-agent", type: "agent" as const, startTimeMs: 1 },
+      spans: [] as any[],
+      activeGenerations: new Map(),
+      generationOrder: [],
+      activeTools: new Map(),
+      generationSeq: 0,
+      cwd: "/tmp",
+      emitted: false,
+    };
+    run.spans.push(run.root);
+    return run;
+  };
+
+  it("retries once on a thrown fetch and succeeds on the fresh attempt", async () => {
+    await runWithSession("retry-session", async () => {
+      let calls = 0;
+      const ok = await sendScores(makeRun() as any, {
+        fetchFn: async () => {
+          calls += 1;
+          if (calls === 1) {
+            throw new TypeError("fetch failed", { cause: new Error("connect EBADF 127.0.0.1:3000") });
+          }
+          return { ok: true, status: 202 };
+        },
+      });
+
+      expect(calls, "第一次抛错后必须重试恰好一次").toBe(2);
+      expect(ok, "重试成功时 sendScores 必须返回 true").toBe(true);
+    });
+  });
+
+  it("logs a single concise line without a stack trace when both attempts throw", async () => {
+    const warnings: unknown[][] = [];
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      warnings.push(args);
+    });
+
+    try {
+      await runWithSession("fail-session", async () => {
+        let calls = 0;
+        const ok = await sendScores(makeRun() as any, {
+          fetchFn: async () => {
+            calls += 1;
+            throw new TypeError("fetch failed", { cause: new Error("connect EBADF 127.0.0.1:3000") });
+          },
+        });
+
+        expect(ok, "两次均失败时 sendScores 必须返回 false").toBe(false);
+        expect(calls, "网络抛错最多尝试两次").toBe(2);
+      });
+
+      expect(warnings, "最终失败必须恰好输出一条 warn").toHaveLength(1);
+      expect(warnings[0], "warn 必须是单参数单行消息，不得附带 Error 对象").toHaveLength(1);
+      const line = String(warnings[0][0]);
+      expect(line, "消息必须保留既有前缀语义").toContain("Failed to send scores (dropped, trace unaffected)");
+      expect(line, "消息必须包含错误摘要").toContain("TypeError: fetch failed");
+      expect(line, "消息必须包含 cause 摘要以便定位网络错误").toContain("connect EBADF");
+      expect(line, "消息不得包含堆栈行").not.toContain("\n    at ");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does not retry an HTTP error response and logs the status concisely", async () => {
+    const warnings: unknown[][] = [];
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      warnings.push(args);
+    });
+
+    try {
+      await runWithSession("http-fail-session", async () => {
+        let calls = 0;
+        const ok = await sendScores(makeRun() as any, {
+          fetchFn: async () => {
+            calls += 1;
+            return { ok: false, status: 401 };
+          },
+        });
+
+        expect(ok, "HTTP 错误时 sendScores 必须返回 false").toBe(false);
+        expect(calls, "HTTP 错误不得重试").toBe(1);
+      });
+
+      expect(warnings, "HTTP 错误必须恰好输出一条 warn").toHaveLength(1);
+      expect(String(warnings[0][0]), "warn 必须包含 HTTP 状态码").toContain("HTTP 401");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("collectScores derives entries from run spans and session counters only", () => {
     runWithSession("collect-session", () => {
       const session = getSessionRunState();
