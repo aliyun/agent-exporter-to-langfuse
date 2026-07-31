@@ -20,6 +20,12 @@ dist/
 # Claude Code local config
 .claude/
 
+# Local agent artifacts
+.pi-subagents/
+
+# Packaging temp dir
+.tmp-pkg/
+
 # Test / Coverage
 .coverage
 htmlcov/
