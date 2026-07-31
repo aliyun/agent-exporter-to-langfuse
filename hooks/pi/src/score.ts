@@ -3,9 +3,11 @@
  * concept, so they cannot travel through the OTLP delivery chain; they are
  * POSTed directly to {LANGFUSE_BASE_URL}/api/public/ingestion using the same
  * credentials as delivery Tier 2. This is the only exemption from R-1's
- * "never bypass deliverTrace()" rule. Failures are logged and dropped: no
- * retry, no buffering, and never any effect on the trace delivery result.
- * The same aggregate values are mirrored into the root observation metadata.
+ * "never bypass deliverTrace()" rule. A thrown fetch (e.g. a stale keep-alive
+ * socket surfacing as `connect EBADF`) is retried once on a fresh connection;
+ * after that failures are logged as a single concise line and dropped: no
+ * buffering, and never any effect on the trace delivery result. The same
+ * aggregate values are mirrored into the root observation metadata.
  */
 import { randomUUID } from "node:crypto";
 
@@ -61,14 +63,32 @@ export interface SendScoresOptions {
   fetchFn?: FetchFn;
 }
 
+const SCORE_REQUEST_TIMEOUT_MS = 10_000;
+const SCORE_RETRY_DELAY_MS = 200;
+
 const defaultFetch: FetchFn = async (url, options) => {
   const resp = await fetch(url, {
     method: options.method,
     headers: options.headers,
     body: options.body,
+    signal: AbortSignal.timeout(SCORE_REQUEST_TIMEOUT_MS),
   });
   return { ok: resp.ok, status: resp.status };
 };
+
+/** One concise line for the warn log: no stack trace dump into the Pi terminal. */
+function describeError(e: unknown): string {
+  if (!(e instanceof Error)) {
+    return String(e);
+  }
+  const cause = (e as { cause?: unknown }).cause;
+  const causeText = cause instanceof Error ? ` (cause: ${cause.message})` : "";
+  return `${e.name}: ${e.message}${causeText}`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Send the scores for an already-delivered run. Returns true only when the
@@ -85,6 +105,7 @@ export async function sendScores(
     return false;
   }
 
+  let request: { url: string; options: Parameters<FetchFn>[1] };
   try {
     const timestamp = new Date().toISOString();
     const batch = collectScores(run, options.sessionId).map((entry) => ({
@@ -100,19 +121,43 @@ export async function sendScores(
       },
     }));
 
-    const doFetch = options.fetchFn ?? defaultFetch;
     const credentials = Buffer.from(`${publicKey}:${secretKey}`).toString("base64");
-    const resp = await doFetch(`${baseUrl}/api/public/ingestion`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${credentials}`,
+    request = {
+      url: `${baseUrl}/api/public/ingestion`,
+      options: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${credentials}`,
+        },
+        body: JSON.stringify({ batch }),
       },
-      body: JSON.stringify({ batch }),
-    });
-    return resp.ok;
+    };
   } catch (e) {
-    console.warn("📊 Langfuse: Failed to send scores (dropped, trace unaffected)", e);
+    console.warn(`📊 Langfuse: Failed to build score batch (dropped, trace unaffected): ${describeError(e)}`);
     return false;
   }
+
+  // A thrown fetch is usually a transient socket problem (stale keep-alive
+  // connection reused right after the trace POST → `connect EBADF`); one
+  // retry on a fresh connection recovers it. HTTP errors are not retried.
+  const doFetch = options.fetchFn ?? defaultFetch;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) {
+      await delay(SCORE_RETRY_DELAY_MS);
+    }
+    try {
+      const resp = await doFetch(request.url, request.options);
+      if (!resp.ok) {
+        console.warn(`📊 Langfuse: Score request rejected with HTTP ${resp.status} (dropped, trace unaffected)`);
+      }
+      return resp.ok;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  console.warn(`📊 Langfuse: Failed to send scores (dropped, trace unaffected): ${describeError(lastError)}`);
+  return false;
 }

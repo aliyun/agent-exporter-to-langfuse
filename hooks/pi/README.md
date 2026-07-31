@@ -99,8 +99,10 @@ buffered OTLP delivery chain. The hook sends them **directly** to
 - trace-level: `tool_call_count`, `turn_count`, `total_tool_errors`, `tool_success_rate` (NUMERIC) and `session_had_errors` (BOOLEAN)
 - observation-level: `tool_is_error` (BOOLEAN) per failed tool call
 
-This channel is best-effort: on failure the scores are logged and dropped — no retry, no
-buffering. Score delivery never blocks or changes the trace delivery result.
+This channel is best-effort: a network-level failure (e.g. a stale keep-alive socket) is
+retried once on a fresh connection; after that the scores are logged as a single concise
+warning line and dropped — no buffering. Score delivery never blocks or changes the trace
+delivery result.
 
 **Degradation semantics:** if Langfuse is unreachable when the run ends, the trace still
 arrives later through the buffered chain but the Scores for that run are lost. The same

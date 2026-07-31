@@ -77,7 +77,7 @@ agent-exporter-to-langfuse 已为 claude-code、opencode、codex 等 agent 提�
 - must:
   - run 结束（含中断发射）后，hook 将 trace 级评分 `tool_call_count`、`turn_count`、`total_tool_errors`、`tool_success_rate`（NUMERIC）与 `session_had_errors`（BOOLEAN）关联 traceId 批量 POST 到 `{LANGFUSE_BASE_URL}/api/public/ingestion`（score-create、Basic Auth，凭据取自与 Tier 2 相同的环境变量）；工具失败时追加 tool 级 `tool_is_error`（BOOLEAN）关联对应观测。
   - 上述聚合值同时镜像写入 root 观测的 metadata（沿用 pi-langfuse 既有行为），作为 score 发送失败时的兜底。
-  - score 发送为 best-effort：失败仅记录日志后丢弃，不重试、不缓冲；hook README 明示该降级语义（score 可能缺失，metadata 镜像兜底）。
+  - score 发送为 best-effort：网络层抛错（如 stale keep-alive socket 导致的 `connect EBADF`）以新连接原地重试一次；仍失败或收到 HTTP 错误时，仅以单行摘要日志（不含堆栈）记录后丢弃，不缓冲；hook README 明示该降级语义（score 可能缺失，metadata 镜像兜底）。
 - must_not:
   - score 载荷不得进入 exporter 的 `/ingest`、pending/failed 存储或 Sender 转发路径；score 发送的失败或延迟不得阻塞、延后或影响 trace 投递结果。
 - verification:
