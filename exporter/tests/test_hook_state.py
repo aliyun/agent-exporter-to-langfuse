@@ -8,6 +8,8 @@ import pytest
 
 from src.hook_state import (
     HookStatus,
+    _builtin_agent_definitions,
+    _check_hook_markers,
     get_mismatch_info,
     load_hook_state,
     probe_hook_states,
@@ -179,3 +181,83 @@ class TestProbeHookStates:
         with patch("src.hook_state._builtin_agent_definitions", return_value=defs):
             state = probe_hook_states()
         assert state["test-agent"]["status"] == "installed"
+
+
+class TestPiAgentDefinition:
+    """The pi entry detects Pi and derives hook state only from settings.json."""
+
+    def _pi_definition(self) -> dict:
+        defs = [d for d in _builtin_agent_definitions() if d["id"] == "pi"]
+        assert len(defs) == 1, "_builtin_agent_definitions 必须恰好包含一个 pi 条目"
+        return defs[0]
+
+    def test_pi_definition_shape(self) -> None:
+        defn = self._pi_definition()
+        assert defn["detection"]["paths"] == [str(Path.home() / ".pi")], "pi 探测路径必须是 ~/.pi"
+        assert defn["detection"]["commands"] == ["pi"], "pi 探测命令必须是 pi"
+        assert defn["hook"]["settingsPath"] == str(
+            Path.home() / ".pi" / "agent" / "settings.json"
+        ), "pi hook 检测必须读取 ~/.pi/agent/settings.json"
+        assert "hooks/langfuse" in defn["hook"]["markers"], "pi markers 必须含安装路径标识 hooks/langfuse"
+        assert "fileCheck" not in defn["hook"], (
+            "pi 条目不得配置 fileCheck：_check_hook_markers 中 fileCheck 命中即返回 True，"
+            "会使 bundle 残留但未注册时误报 installed"
+        )
+
+    def test_markers_follow_registration_entry(self, tmp_path: Path) -> None:
+        settings_file = tmp_path / "settings.json"
+        hook_path = str(tmp_path / ".pi" / "hooks" / "langfuse")
+        settings_file.write_text(json.dumps({"packages": [hook_path]}))
+        defn = {
+            "id": "pi",
+            "hook": {"settingsPath": str(settings_file), "markers": ["hooks/langfuse"]},
+        }
+        assert _check_hook_markers(defn) is True, "settings.json 含注册条目时必须判定为已安装"
+
+        settings_file.write_text(json.dumps({"packages": ["npm:some-other-extension"]}))
+        assert _check_hook_markers(defn) is False, "移除注册条目后必须判定为未安装"
+
+    def test_leftover_bundle_alone_does_not_report_installed(self, tmp_path: Path) -> None:
+        """A bundle left on disk without a registration entry must not look installed."""
+        pi_home = tmp_path / ".pi"
+        (pi_home / "agent").mkdir(parents=True)
+        hook_dir = pi_home / "hooks" / "langfuse"
+        hook_dir.mkdir(parents=True)
+        (hook_dir / "index.mjs").write_text("// leftover bundle")
+        settings_file = pi_home / "agent" / "settings.json"
+        settings_file.write_text(json.dumps({"packages": []}))
+
+        defs = [
+            {
+                "id": "pi",
+                "detection": {"paths": [str(pi_home)]},
+                "hook": {"settingsPath": str(settings_file), "markers": ["hooks/langfuse"]},
+            }
+        ]
+        save_hook_state({"pi": {"version": "0.3.0", "status": "installed"}})
+        with patch("src.hook_state._builtin_agent_definitions", return_value=defs):
+            state = probe_hook_states()
+        assert state["pi"]["status"] == HookStatus.ERROR.value, (
+            "注册条目缺失时 installed 必须转为 error，即使 bundle 文件仍在"
+        )
+        assert "overwritten" in state["pi"]["error"]
+
+    def test_installed_stays_installed_with_registration_entry(self, tmp_path: Path) -> None:
+        pi_home = tmp_path / ".pi"
+        (pi_home / "agent").mkdir(parents=True)
+        settings_file = pi_home / "agent" / "settings.json"
+        settings_file.write_text(
+            json.dumps({"packages": [str(pi_home / "hooks" / "langfuse")]})
+        )
+
+        defs = [
+            {
+                "id": "pi",
+                "detection": {"paths": [str(pi_home)]},
+                "hook": {"settingsPath": str(settings_file), "markers": ["hooks/langfuse"]},
+            }
+        ]
+        save_hook_state({"pi": {"version": "0.3.0", "status": "installed"}})
+        with patch("src.hook_state._builtin_agent_definitions", return_value=defs):
+            state = probe_hook_states()
+        assert state["pi"]["status"] == HookStatus.INSTALLED.value

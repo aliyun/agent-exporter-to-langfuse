@@ -1,0 +1,24 @@
+{
+  "name": "@agent-exporter-to-langfuse/pi-hook",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trace Pi Coding Agent runs to Langfuse with langstash delivery",
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "lint:tsc": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "pi": {
+    "extensions": ["./dist/index.mjs"]
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsdown": "^0.18.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

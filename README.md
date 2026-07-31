@@ -8,6 +8,7 @@ Export AI Agent session observability data (conversation turns, model calls, too
 ┌───────────────────────────────────────────────────────────────┐
 │                         AI Agents                             │
 │  Claude Code · Qoder · QoderWork · OpenCode · Codex · Cursor  │
+│                            · Pi                               │
 └────────┬──────────────────────────────────────────────────────┘
          │ Plugin Hook (per-agent)
          ▼
@@ -42,6 +43,7 @@ Export AI Agent session observability data (conversation turns, model calls, too
 | [OpenCode](https://opencode.ai) | [`hooks/opencode/`](./hooks/opencode/) | Collect OpenCode session data via Plugin Hook |
 | [Codex](https://developers.openai.com/codex) | [`hooks/codex/`](./hooks/codex/) | Collect OpenAI Codex CLI session data via Plugin Hook |
 | [Cursor](https://cursor.com) | [`hooks/cursor/`](./hooks/cursor/) | Collect Cursor IDE Agent session data via Hooks |
+| [Pi](https://github.com/earendil-works/pi) | [`hooks/pi/`](./hooks/pi/) | Collect Pi Coding Agent run data via an extension (`bash hooks/pi/install.sh`) |
 
 See the README in each directory for detailed configuration and usage instructions.
 

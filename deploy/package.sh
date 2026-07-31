@@ -126,6 +126,24 @@ if [ -f "$TS_CURSOR/package.json" ]; then
     rm -rf "$TS_CURSOR/node_modules"
 fi
 
+# Pre-build pi hook so dist/index.mjs is available for install.sh
+TS_PI="$STAGE_TARGET/hooks/pi"
+if [ -f "$TS_PI/package.json" ]; then
+    echo "Building pi hook ..."
+    if (cd "$TS_PI" && npm install --ignore-scripts && npm run build); then
+        :
+    else
+        rc=$?
+        echo "ERROR: pi hook build failed (exit code $rc)" >&2
+        exit 1
+    fi
+    if [ ! -f "$TS_PI/dist/index.mjs" ]; then
+        echo "ERROR: pi hook build succeeded but dist/index.mjs not found" >&2
+        exit 1
+    fi
+    rm -rf "$TS_PI/node_modules"
+fi
+
 mkdir -p "$OUTPUT_DIR"
 
 (cd "$STAGING_DIR" && tar czf "$TARBALL_NAME" "agent-exporter-to-langfuse-${VERSION}")
