@@ -13,6 +13,13 @@ logger = logging.getLogger("langstash.ingestor")
 
 MAX_BODY_BYTES = 10 * 1024 * 1024
 
+# Max serialized bytes per OTLP chunk written when recovering an oversized
+# failed trace. Kept under the 10MB server/Langfuse acceptance threshold so each
+# chunk is deliverable as a single Langfuse OTel POST. A failed trace larger than
+# OTLP_CHUNK_BYTES is split into multiple chunks sharing one traceId; Langfuse
+# reassembles the trace by traceId/spanId.
+OTLP_CHUNK_BYTES = 9 * 1024 * 1024
+
 RECOVER_INTERVAL = 60
 
 _HEX_32_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -131,7 +138,7 @@ def ingest(body: dict[str, Any], state: IngestState, data_dir: Path, state_path:
 
     if len(line.encode("utf-8")) > MAX_BODY_BYTES:
         state.next_seq_id -= 1
-        raise IngestError(413, "payload exceeds 10MB limit")
+        raise IngestError(413, f"payload exceeds {MAX_BODY_BYTES // (1024 * 1024)}MB limit")
 
     today = now.strftime("%Y-%m-%d")
     filename = f"{today}.jsonl"
@@ -155,6 +162,110 @@ def ingest(body: dict[str, Any], state: IngestState, data_dir: Path, state_path:
     return seq_id
 
 
+def _otlp_body_bytes(body: dict[str, Any]) -> int:
+    return len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _split_otlp(body: dict[str, Any], max_bytes: int) -> list[dict[str, Any]]:
+    """Split a single-resource OTLP body into chunks each <= max_bytes.
+
+    Each chunk duplicates the original root span so it still passes
+    validate_otlp's root-span requirement. Returns [] when the body shape is
+    not safely splittable (multi-resource, zero/multiple roots) or when a
+    single span alone exceeds max_bytes; the caller then drops the line.
+    """
+    rs = body.get("resourceSpans")
+    if not isinstance(rs, list) or len(rs) != 1:
+        return []
+    r = rs[0]
+    if not isinstance(r, dict):
+        return []
+    ss_list = r.get("scopeSpans")
+    if not isinstance(ss_list, list) or len(ss_list) != 1:
+        return []
+    scope_obj = ss_list[0]
+    if not isinstance(scope_obj, dict):
+        return []
+    scope = scope_obj.get("scope", {})
+    spans = scope_obj.get("spans", [])
+    if not isinstance(spans, list):
+        return []
+    resource = r.get("resource", {})
+
+    roots = [s for s in spans if isinstance(s, dict) and not s.get("parentSpanId")]
+    if len(roots) != 1:
+        return []
+    root = roots[0]
+    children = [s for s in spans if s is not root]
+
+    def make_chunk(batch: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"resourceSpans": [{
+            "resource": resource,
+            "scopeSpans": [{"scope": scope, "spans": [root, *batch]}],
+        }]}
+
+    def chunk_bytes(batch: list[dict[str, Any]]) -> int:
+        return len(json.dumps(make_chunk(batch), ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+    if chunk_bytes([]) > max_bytes:
+        return []
+
+    chunks: list[dict[str, Any]] = []
+    batch: list[dict[str, Any]] = []
+    for sp in children:
+        if chunk_bytes([*batch, sp]) <= max_bytes:
+            batch.append(sp)
+            continue
+        if batch:
+            chunks.append(make_chunk(batch))
+            batch = []
+        if chunk_bytes([sp]) <= max_bytes:
+            batch.append(sp)
+        else:
+            return []
+    if batch:
+        chunks.append(make_chunk(batch))
+    return chunks if chunks else [make_chunk([])]
+
+
+def _recover_line(body: dict[str, Any], state: IngestState, data_dir: Path,
+                   state_path: Path, fname: str) -> int | None:
+    """Re-ingest one recovered trace, splitting oversized bodies.
+
+    Returns the number of pending lines written (>=0, 0 when dropped), or None
+    when a transient error means the line should be retried next cycle.
+    """
+    if _otlp_body_bytes(body) <= OTLP_CHUNK_BYTES:
+        try:
+            ingest(body, state, data_dir, state_path)
+            return 1
+        except IngestError as e:
+            logger.warning("recover drop (%s): %s", fname, e.message)
+            return 0
+        except OSError as e:
+            logger.error("recover retry (%s): %s", fname, e)
+            return None
+
+    chunks = _split_otlp(body, OTLP_CHUNK_BYTES)
+    if not chunks:
+        logger.warning(
+            "recover drop (%s): payload exceeds %dMB and cannot be split",
+            fname, OTLP_CHUNK_BYTES // (1024 * 1024),
+        )
+        return 0
+    count = 0
+    try:
+        for chunk in chunks:
+            ingest(chunk, state, data_dir, state_path)
+            count += 1
+    except IngestError as e:
+        logger.warning("recover drop (%s): chunk ingest failed: %s", fname, e.message)
+    except OSError as e:
+        logger.error("recover retry (%s): %s", fname, e)
+        return None if count == 0 else count
+    return count
+
+
 def recover_failed(data_dir: Path, state: IngestState, state_path: Path) -> int:
     failed_dir = data_dir / "failed"
     if not failed_dir.exists():
@@ -162,27 +273,42 @@ def recover_failed(data_dir: Path, state: IngestState, state_path: Path) -> int:
 
     recovered = 0
     for fpath in sorted(failed_dir.glob("*.jsonl")):
-        ok = True
-        with open(fpath, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    body = json.loads(line)
-                except json.JSONDecodeError:
-                    logger.warning("recover skip (%s): JSONDecodeError", fpath.name)
-                    ok = False
-                    continue
-                try:
-                    ingest(body, state, data_dir, state_path)
-                    recovered += 1
-                except IngestError as e:
-                    logger.warning("recover skip (%s): %s", fpath.name, e.message)
-                    ok = False
-        if ok:
-            fpath.unlink(missing_ok=True)
-            logger.info("recovered %s", fpath.name)
+        kept: list[str] = []
+        with open(fpath, "r+", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                lines = [ln.strip() for ln in f if ln.strip()]
+                for line in lines:
+                    try:
+                        body = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.warning("recover drop (%s): JSONDecodeError", fpath.name)
+                        continue
+                    result = _recover_line(body, state, data_dir, state_path, fpath.name)
+                    if result is None:
+                        kept.append(line)
+                    else:
+                        recovered += result
+                if kept:
+                    f.seek(0)
+                    f.truncate()
+                    f.write("\n".join(kept) + "\n")
+                    f.flush()
+                else:
+                    f.seek(0)
+                    f.truncate()
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+        if kept:
+            logger.info("recover partial (%s): %d line(s) deferred for retry",
+                        fpath.name, len(kept))
+        else:
+            try:
+                fpath.unlink(missing_ok=True)
+                logger.info("recovered %s", fpath.name)
+            except OSError:
+                # a hook may have appended between unlock and unlink; leave it
+                pass
     return recovered
 
 

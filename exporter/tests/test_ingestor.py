@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 import pytest
 
-from src.ingestor import IngestError, MAX_BODY_BYTES, _accumulate_tokens, ingest, validate_otlp, recover_failed
+from src.ingestor import (
+    IngestError, MAX_BODY_BYTES, OTLP_CHUNK_BYTES,
+    _accumulate_tokens, _otlp_body_bytes, _split_otlp, ingest, recover_failed, validate_otlp,
+)
 from src.state import IngestState
 
 
@@ -30,6 +33,43 @@ def _valid_otlp(**overrides):
     }
     base.update(overrides)
     return base
+
+
+def _otlp_with_many_spans(n_children: int = 20) -> dict:
+    """Return a valid single-resource OTLP body with one root + n child spans.
+
+    Each child carries a ~200-byte attribute so a modest n exceeds a small
+    chunk budget without building multi-megabyte test data.
+    """
+    root = {
+        "traceId": "a" * 32,
+        "spanId": "b" * 16,
+        "name": "root",
+        "startTimeUnixNano": "1718000000000000000",
+        "endTimeUnixNano": "1718000001000000000",
+    }
+    children = []
+    for i in range(n_children):
+        children.append({
+            "traceId": "a" * 32,
+            "spanId": f"{(i + 1):016x}",
+            "parentSpanId": "b" * 16,
+            "name": f"gen-{i}",
+            "startTimeUnixNano": "1718000000000000000",
+            "endTimeUnixNano": "1718000001000000000",
+            "attributes": [
+                {"key": "langfuse.observation.type", "value": {"stringValue": "generation"}},
+                {"key": "langfuse.observation.output", "value": {"stringValue": "z" * 200}},
+            ],
+        })
+    return {
+        "resourceSpans": [{
+            "scopeSpans": [{
+                "scope": {"name": "agent-exporter-to-langfuse"},
+                "spans": [root, *children],
+            }],
+        }],
+    }
 
 
 def _span_with_usage(input_tokens=100, output_tokens=50, cache_read=0, cache_creation=0):
@@ -250,6 +290,7 @@ class TestRecoverFailed:
 
         assert n == 0
         assert any("JSONDecodeError" in r.message for r in caplog.records)
+        assert not (failed_dir / "2024-01-01.jsonl").exists()
 
     def test_skips_old_format_trace_json_v2(self, tmp_path: Path, caplog) -> None:
         data_dir = tmp_path / "data"
@@ -269,7 +310,9 @@ class TestRecoverFailed:
             n = recover_failed(data_dir, state, state_path)
 
         assert n == 0
-        assert any("recover skip" in r.message for r in caplog.records)
+        assert any("recover drop" in r.message for r in caplog.records)
+        # invalid traces are dropped (file removed) so they don't spam forever
+        assert not (failed_dir / "2024-01-01.jsonl").exists()
 
     def test_skips_validate_otlp_failure(self, tmp_path: Path, caplog) -> None:
         data_dir = tmp_path / "data"
@@ -285,7 +328,8 @@ class TestRecoverFailed:
             n = recover_failed(data_dir, state, state_path)
 
         assert n == 0
-        assert any("recover skip" in r.message for r in caplog.records)
+        assert any("recover drop" in r.message for r in caplog.records)
+        assert not (failed_dir / "2024-01-01.jsonl").exists()
 
     def test_recovers_valid_otlp(self, tmp_path: Path) -> None:
         data_dir = tmp_path / "data"
@@ -299,4 +343,130 @@ class TestRecoverFailed:
 
         n = recover_failed(data_dir, state, state_path)
         assert n == 1
+        assert not (failed_dir / "2024-01-01.jsonl").exists()
+
+    def test_does_not_re_recover_handled_lines(self, tmp_path: Path) -> None:
+        """A recovered line must be removed so it is not re-ingested next cycle.
+
+        Regression for the duplicate re-ingestion bug: previously, any
+        permanently-failed line in a file kept ok=False, so every recoverable
+        line in that file was re-ingested each cycle -> duplicate pending lines
+        and duplicate Langfuse deliveries.
+        """
+        data_dir = tmp_path / "data"
+        failed_dir = data_dir / "failed"
+        failed_dir.mkdir(parents=True)
+        state_path = tmp_path / "ingest.json"
+        state = IngestState()
+
+        (failed_dir / "2024-01-01.jsonl").write_text(json.dumps(_valid_otlp()) + "\n")
+
+        n1 = recover_failed(data_dir, state, state_path)
+        assert n1 == 1
+        assert not (failed_dir / "2024-01-01.jsonl").exists()
+        # second cycle: nothing left to recover, no duplicates produced
+        n2 = recover_failed(data_dir, state, state_path)
+        assert n2 == 0
+
+    def test_mixed_file_recovers_all_and_removes_file(self, tmp_path: Path, monkeypatch) -> None:
+        """A file with one small trace + one oversized trace: the small one is
+        ingested whole and the oversized one is split, then the file is removed
+        (no permanent skip, no duplicate re-ingestion next cycle).
+        """
+        monkeypatch.setattr("src.ingestor.OTLP_CHUNK_BYTES", 4000)
+        data_dir = tmp_path / "data"
+        failed_dir = data_dir / "failed"
+        failed_dir.mkdir(parents=True)
+        state_path = tmp_path / "ingest.json"
+        state = IngestState()
+
+        small = json.dumps(_valid_otlp())
+        big = json.dumps(_otlp_with_many_spans(n_children=30))
+        (failed_dir / "2024-01-01.jsonl").write_text(small + "\n" + big + "\n")
+
+        n = recover_failed(data_dir, state, state_path)
+        # small -> 1 line; big -> multiple chunks; total > 1
+        assert n > 1
+        assert not (failed_dir / "2024-01-01.jsonl").exists()
+        # each written pending line is a valid OTLP body with a root span
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        pending = data_dir / "pending" / f"{today}.jsonl"
+        assert pending.exists()
+        for line in pending.read_text(encoding="utf-8").splitlines():
+            body = json.loads(line)
+            roots = [
+                s for rs in body.get("resourceSpans", [])
+                for ss in rs.get("scopeSpans", [])
+                for s in ss.get("spans", [])
+                if not s.get("parentSpanId")
+            ]
+            assert len(roots) == 1, "each split chunk must carry exactly one root span"
+        # second cycle: file gone, no duplicates
+        assert recover_failed(data_dir, state, state_path) == 0
+
+    def test_split_otlp_chunks_each_under_budget_with_root(self) -> None:
+        body = _otlp_with_many_spans(n_children=20)
+        budget = 3000
+        chunks = _split_otlp(body, budget)
+        assert len(chunks) >= 2
+        for chunk in chunks:
+            assert _otlp_body_bytes(chunk) <= budget
+            roots = [
+                s for rs in chunk["resourceSpans"]
+                for ss in rs["scopeSpans"]
+                for s in ss["spans"]
+                if not s.get("parentSpanId")
+            ]
+            assert len(roots) == 1
+            validate_otlp(chunk)
+        # every original child span appears exactly once across chunks
+        original_child_ids = {
+            s["spanId"] for s in body["resourceSpans"][0]["scopeSpans"][0]["spans"]
+            if s.get("parentSpanId")
+        }
+        chunk_child_ids: list[str] = []
+        for c in chunks:
+            for s in c["resourceSpans"][0]["scopeSpans"][0]["spans"]:
+                if s.get("parentSpanId"):
+                    chunk_child_ids.append(s["spanId"])
+        assert set(chunk_child_ids) == original_child_ids
+        assert len(chunk_child_ids) == len(original_child_ids)
+
+    def test_split_returns_empty_for_unsplittable_root_too_big(self) -> None:
+        """A body whose root span alone exceeds the budget cannot be split."""
+        body = _valid_otlp()
+        body["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"] = [
+            {"key": "big", "value": {"stringValue": "x" * 5000}}
+        ]
+        assert _split_otlp(body, 1000) == []
+
+    def test_split_returns_empty_for_multi_resource(self) -> None:
+        body = _valid_otlp()
+        body["resourceSpans"] = body["resourceSpans"] + body["resourceSpans"]
+        assert _split_otlp(body, 1_000_000) == []
+
+    def test_recovers_oversized_without_split_returns_empty_handled_as_drop(
+        self, tmp_path: Path, monkeypatch, caplog
+    ) -> None:
+        """An oversized trace whose root alone exceeds the chunk budget is dropped
+        once (not retried forever) and the file is removed."""
+        monkeypatch.setattr("src.ingestor.OTLP_CHUNK_BYTES", 1000)
+        data_dir = tmp_path / "data"
+        failed_dir = data_dir / "failed"
+        failed_dir.mkdir(parents=True)
+        state_path = tmp_path / "ingest.json"
+        state = IngestState()
+
+        body = _valid_otlp()
+        body["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"] = [
+            {"key": "big", "value": {"stringValue": "x" * 5000}}
+        ]
+        (failed_dir / "2024-01-01.jsonl").write_text(json.dumps(body) + "\n")
+
+        with caplog.at_level(logging.WARNING):
+            n = recover_failed(data_dir, state, state_path)
+
+        assert n == 0
+        assert any("cannot be split" in r.message for r in caplog.records)
         assert not (failed_dir / "2024-01-01.jsonl").exists()

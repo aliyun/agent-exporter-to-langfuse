@@ -39,6 +39,11 @@ def _setup_logging(debug: bool = False) -> logging.Logger:
     stderr_handler.setFormatter(fmt)
     root.addHandler(stderr_handler)
 
+    # The sender logs one contextual line per OTLP POST (seq + trace time +
+    # status), so suppress httpx's generic INFO request lines in normal
+    # operation; keep them under --debug for raw troubleshooting.
+    logging.getLogger("httpx").setLevel(logging.DEBUG if debug else logging.WARNING)
+
     return logging.getLogger("langstash")
 
 

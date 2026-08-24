@@ -77,9 +77,12 @@ def create_app(config: Config, ingest_state: IngestState, ingest_state_path: Pat
             pending = 0
         now = datetime.now(timezone.utc)
         today = now.strftime("%Y-%m-%d")
-        today_file = data_dir / "pending" / f"{today}.jsonl"
-        traces_today = sum(1 for line in open(today_file, encoding="utf-8") if line.strip()) if today_file.exists() else 0
         today_entry = ingest_state.files.get(f"{today}.jsonl")
+        # traces_today from seq range in state (O(1)); never re-scan a pending
+        # file that may be hundreds of MB large.
+        traces_today = 0
+        if today_entry and today_entry.max_seq >= today_entry.min_seq > 0:
+            traces_today = today_entry.max_seq - today_entry.min_seq + 1
         tokens_today: dict[str, int] = {
             "input": today_entry.input if today_entry else 0,
             "output": today_entry.output if today_entry else 0,
