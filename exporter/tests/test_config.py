@@ -125,9 +125,9 @@ class TestSetConfigValue:
 
 
 class TestBatchSizeDefault:
-    def test_default_is_1(self, tmp_path: Path) -> None:
+    def test_default_is_10(self, tmp_path: Path) -> None:
         cfg = load_config(tmp_path / "nonexistent.toml")
-        assert cfg.sender.batch_size == 1
+        assert cfg.sender.batch_size == 10
 
     def test_no_max_payload_bytes(self, tmp_path: Path) -> None:
         cfg = load_config(tmp_path / "nonexistent.toml")

@@ -1,6 +1,7 @@
 import json
 import logging
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,56 @@ from src.state import (
 )
 
 logger = logging.getLogger("langstash.sender")
+
+
+def _trace_time_range(body: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Return (min start_ns, max end_ns) across all spans in an OTLP body."""
+    starts: list[int] = []
+    ends: list[int] = []
+    for rs in body.get("resourceSpans", []):
+        for ss in rs.get("scopeSpans", []):
+            for sp in ss.get("spans", []):
+                s = sp.get("startTimeUnixNano")
+                if isinstance(s, str) and s:
+                    try:
+                        starts.append(int(s))
+                    except ValueError:
+                        pass
+                e = sp.get("endTimeUnixNano")
+                if isinstance(e, str) and e:
+                    try:
+                        ends.append(int(e))
+                    except ValueError:
+                        pass
+    if not starts:
+        return None, None
+    min_start = min(starts)
+    max_end = max(ends) if ends else min_start
+    return min_start, max_end
+
+
+def _fmt_time(start_ns: int | None, end_ns: int | None) -> str:
+    """Format a trace time range as a human-friendly local-time string."""
+    if start_ns is None:
+        return "time=unknown"
+    start = datetime.fromtimestamp(start_ns / 1e9, tz=timezone.utc).astimezone()
+    if end_ns is None or end_ns == start_ns:
+        return start.strftime("time=%Y-%m-%d %H:%M:%S")
+    end = datetime.fromtimestamp(end_ns / 1e9, tz=timezone.utc).astimezone()
+    if start.date() == end.date():
+        return f"time={start.strftime('%Y-%m-%d %H:%M:%S')}~{end.strftime('%H:%M:%S')}"
+    return f"time={start.strftime('%Y-%m-%d %H:%M:%S')}~{end.strftime('%Y-%m-%d %H:%M:%S')}"
+
+
+def _fmt_trace(start_ns: int | None, end_ns: int | None) -> str:
+    """Format a single trace as start time + duration in milliseconds."""
+    if start_ns is None:
+        return "time=unknown"
+    start = datetime.fromtimestamp(start_ns / 1e9, tz=timezone.utc).astimezone()
+    dur_ms = 0
+    if end_ns is not None and end_ns > start_ns:
+        dur_ms = int((end_ns - start_ns) / 1_000_000)
+    return f"time={start.strftime('%Y-%m-%d %H:%M:%S')} +{dur_ms}ms"
 
 
 def _read_pending_traces(
@@ -118,8 +169,15 @@ class Sender:
 
         last_success_seq = self._state.commit_id
 
+        # Track seq + trace-time range across the batch for richer logging.
+        batch_min_seq: int | None = None
+        batch_max_seq: int | None = None
+        batch_min_start: int | None = None
+        batch_max_end: int | None = None
+
         for trace in traces:
             seq = trace.get("_seq_id", 0)
+            t_start, t_end = _trace_time_range(trace)
 
             try:
                 resp = self._post_otlp(trace)
@@ -129,7 +187,18 @@ class Sender:
                 raise
 
             if 200 <= resp.status_code < 300:
+                logger.info(
+                    "posted seq=%d %s -> %d %s",
+                    seq, _fmt_trace(t_start, t_end), resp.status_code,
+                    self._langfuse.base_url,
+                )
                 last_success_seq = seq
+                batch_min_seq = seq if batch_min_seq is None else min(batch_min_seq, seq)
+                batch_max_seq = seq
+                if t_start is not None:
+                    batch_min_start = t_start if batch_min_start is None else min(batch_min_start, t_start)
+                if t_end is not None:
+                    batch_max_end = t_end if batch_max_end is None else max(batch_max_end, t_end)
                 continue
 
             error_msg = f"HTTP {resp.status_code}"
@@ -154,6 +223,15 @@ class Sender:
         if last_success_seq > self._state.commit_id:
             record_commit(self._state, last_success_seq)
             save_sender_state(self._state_path, self._state)
-            logger.info("sent %d traces (commit_id=%d)", len(traces), last_success_seq)
+            seq_range = (
+                f"seq={batch_min_seq}~{batch_max_seq}"
+                if batch_min_seq is not None and batch_min_seq != batch_max_seq
+                else f"seq={last_success_seq}"
+            )
+            logger.info(
+                "sent %d traces (%s, %s)",
+                len(traces), seq_range,
+                _fmt_time(batch_min_start, batch_max_end),
+            )
 
         return True

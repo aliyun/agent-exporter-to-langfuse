@@ -1,13 +1,16 @@
 """Tests for src.sender — OTLP JSON relay, _read_pending_traces, Sender."""
 
 import json
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 
 from src.config import LangfuseConfig, SenderConfig
-from src.sender import Sender, _read_pending_traces
+from src.sender import (
+    Sender, _fmt_time, _fmt_trace, _read_pending_traces, _trace_time_range,
+)
 from src.state import FileEntry, IngestState, SenderState, save_sender_state
 
 
@@ -224,9 +227,9 @@ class TestSenderOtlpRelay:
 
         assert sender._state.commit_id == 1
 
-    def test_batch_size_default_is_1(self) -> None:
+    def test_batch_size_default_is_10(self) -> None:
         cfg = SenderConfig()
-        assert cfg.batch_size == 1
+        assert cfg.batch_size == 10
 
     def test_network_error_retries(self, tmp_path: Path) -> None:
         sender = _setup_sender(tmp_path)
@@ -240,3 +243,75 @@ class TestSenderOtlpRelay:
 
         assert sender._state.commit_id == 0
         assert sender._state.last_error is not None
+
+
+class TestSenderLogContext:
+    """Rich logging: per-POST line carries seq + trace time + status, and the
+    batch summary carries the seq range + trace-time range."""
+
+    def test_trace_time_range_from_spans(self) -> None:
+        # _make_otlp uses start=1718000000000000000 end=1718000001000000000 ns
+        s, e = _trace_time_range(_make_otlp(1))
+        assert s == 1718000000000000000
+        assert e == 1718000001000000000
+
+    def test_trace_time_range_missing_times(self) -> None:
+        body = {"resourceSpans": [{"scopeSpans": [{"spans": [{"name": "x"}]}]}]}
+        assert _trace_time_range(body) == (None, None)
+
+    def test_fmt_time_human_friendly(self) -> None:
+        s = 1718000000000000000  # 2024-06-10 08:53:20 UTC
+        e = 1718000001000000000  # +1s
+        out = _fmt_time(s, e)
+        assert out.startswith("time=")
+        assert "~" in out  # a range, not a point
+        # same instant collapses to a point (no ~)
+        assert "~" not in _fmt_time(s, s)
+        # unknown
+        assert _fmt_time(None, None) == "time=unknown"
+
+    def test_fmt_trace_single_trace_start_plus_duration_ms(self) -> None:
+        s = 1718000000000000000  # 2024-06-10 08:53:20 UTC
+        e = 1718000001000000000  # +1s = 1000ms
+        out = _fmt_trace(s, e)
+        assert out.startswith("time="), out
+        assert "+1000ms" in out, f"expected +1000ms duration, got: {out}"
+        assert "~" not in out, "single trace must not show a range"
+        # zero duration when end missing or equal -> +0ms
+        assert _fmt_trace(s, s) == _fmt_trace(s, None)
+        assert "+0ms" in _fmt_trace(s, None)
+        assert _fmt_trace(None, None) == "time=unknown"
+
+    def test_posted_line_carries_seq_and_trace_time(self, tmp_path: Path, caplog) -> None:
+        sender = _setup_sender(tmp_path)
+        _write_pending(sender._data_dir, [_make_otlp(42)], sender._ingest_state_path)
+
+        with patch.object(sender, "_post_otlp", return_value=httpx.Response(200)):
+            with caplog.at_level(logging.INFO, logger="langstash.sender"):
+                sender._send_batch()
+
+        posted = [r for r in caplog.records if "posted seq=" in r.message]
+        assert posted, "expected a per-POST 'posted seq=...' log line"
+        assert "seq=42" in posted[0].message
+        assert "-> 200" in posted[0].message
+        assert "time=" in posted[0].message
+        # single trace shows start + duration in ms, never a range (~)
+        assert "+1000ms" in posted[0].message, f"got: {posted[0].message}"
+        assert "~" not in posted[0].message
+
+    def test_batch_summary_carries_seq_range_and_trace_time(self, tmp_path: Path, caplog) -> None:
+        sender = _setup_sender(tmp_path)
+        sender._cfg.batch_size = 5
+        traces = [_make_otlp(i) for i in range(100, 105)]
+        _write_pending(sender._data_dir, traces, sender._ingest_state_path)
+
+        with patch.object(sender, "_post_otlp", return_value=httpx.Response(200)):
+            with caplog.at_level(logging.INFO, logger="langstash.sender"):
+                sender._send_batch()
+
+        summary = [r for r in caplog.records if "sent 5 traces" in r.message]
+        assert summary, "expected a 'sent N traces' summary line"
+        msg = summary[0].message
+        assert "commit_id=" not in msg, "commit_id is redundant now that seq range is shown"
+        assert "seq=100~104" in msg, f"expected seq range in summary, got: {msg}"
+        assert "time=" in msg

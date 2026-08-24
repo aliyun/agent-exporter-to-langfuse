@@ -52,7 +52,7 @@ class StorageConfig:
 class SenderConfig:
     interval_seconds: int = 5
     max_backoff_seconds: int = 300
-    batch_size: int = 1
+    batch_size: int = 10
     timeout_seconds: int = 30
 
 

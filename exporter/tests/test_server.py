@@ -135,6 +135,21 @@ class TestGetStats:
         assert "storage_used_mb" in data
         assert "uptime_seconds" in data
 
+    def test_traces_today_uses_seq_range_without_scanning_file(self, app_env, tmp_path) -> None:
+        """traces_today must come from ingest_state (O(1)), never by scanning a
+        potentially huge pending file. Regression for the restart-on-huge-pending
+        bug where every /stats poll re-read a >1GB file."""
+        from src.state import FileEntry
+        client, _, ingest_state, _ = app_env
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        ingest_state.files[f"{today}.jsonl"] = FileEntry(
+            min_seq=100, max_seq=142,
+            input=10, output=5,
+        )
+        # even if today's pending file is missing, traces_today comes from state
+        data = client.get("/stats").json()
+        assert data["traces_today"] == 43, "traces_today must be max_seq-min_seq+1 from state, not a file scan"
+
     def test_tokens_today_from_file_entry(self, app_env) -> None:
         from src.state import FileEntry
         client, _, ingest_state, _ = app_env
