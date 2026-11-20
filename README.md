@@ -7,8 +7,8 @@ Export AI Agent session observability data (conversation turns, model calls, too
 ```
 ┌───────────────────────────────────────────────────────────────┐
 │                         AI Agents                             │
-│  Claude Code · Qoder · QoderWork · OpenCode · Codex · Cursor  │
-│                            · Pi                               │
+│  Claude Code · Qoder · Qoder CN · QoderWork · OpenCode        │
+│  Codex · Cursor · Pi                                          │
 └────────┬──────────────────────────────────────────────────────┘
          │ Plugin Hook (per-agent)
          ▼
@@ -39,6 +39,7 @@ Export AI Agent session observability data (conversation turns, model calls, too
 |-------|-----------|-------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | [`hooks/claude-code/`](./hooks/claude-code/) | Collect Claude Code session data via Plugin Hook |
 | [Qoder](https://qoder.com) | [`hooks/qoder/`](./hooks/qoder/) | Collect Qoder (CLI / Desktop / QoderWake) session data via Plugin Hook |
+| Qoder CN | [`hooks/qoder-cn/`](./hooks/qoder-cn/) | Collect Qoder CN (国内版 Desktop) session data via Plugin Hook |
 | [QoderWork](https://qoder.com/qoderwork) | [`hooks/qoderwork/`](./hooks/qoderwork/) | Collect QoderWork session data via Plugin Hook |
 | [OpenCode](https://opencode.ai) | [`hooks/opencode/`](./hooks/opencode/) | Collect OpenCode session data via Plugin Hook |
 | [Codex](https://developers.openai.com/codex) | [`hooks/codex/`](./hooks/codex/) | Collect OpenAI Codex CLI session data via Plugin Hook |
@@ -46,6 +47,8 @@ Export AI Agent session observability data (conversation turns, model calls, too
 | [Pi](https://github.com/earendil-works/pi) | [`hooks/pi/`](./hooks/pi/) | Collect Pi Coding Agent run data via an extension (`bash hooks/pi/install.sh`) |
 
 See the README in each directory for detailed configuration and usage instructions.
+
+> **Qoder CN (国内版)** is a Desktop-only product with no CLI form — the unified installer detects it via the `~/.qoder-cn` config directory. See [`hooks/qoder-cn/`](./hooks/qoder-cn/) for install steps, configuration variables, and Desktop-form known limitations.
 
 ## Install
 
