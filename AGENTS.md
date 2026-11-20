@@ -11,7 +11,7 @@
 ## MUST
 
 - install.sh / uninstall.sh 保持幂等。多次执行不能产生副作用（重复写入 profile、重复创建目录等）。
-- 生成方案（设计文档、实现计划、规范等）时，文件名必须携带日期前缀，格式为 `YYYYMMDD`，例如 `20260614-feature-design.md`。
+- 生成方案（设计文档、实现计划、规范等）时，每个需求一个专属目录：`docs/<YYYYMMDD-需求名>/`，目录内固定放置三个文件 `design.md`（设计）、`spec.md`（规范）、`plan.md`（实现计划）。日期前缀体现在目录名上，目录内文件名不再重复日期。同一需求的后续修订在同目录内迭代。存量 `docs/designs/`、`docs/specs/`、`docs/plans/` 平铺目录中的历史工件保持原位，不迁移。
 - 如果更新了部署、安装、运行逻辑，必须同步修改 `README.md` 等用户指导文件，保持文档与实际行为一致。
 - 修改代码逻辑后，必须通过相关的单元测试和 E2E 测试。如果现有测试不覆盖改动，需要补充测试。
 - 如果代码结构发生变化（新增/移除/重命名模块、包、文件），必须检查并适配 `deploy/package.sh`、`deploy/installer.sh`、各 hook 的 `install.sh` / `uninstall.sh`、`pyproject.toml` / `package.json` 等打包和安装脚本，确保构建产物、文件拷贝路径、依赖声明与新结构一致。

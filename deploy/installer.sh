@@ -221,6 +221,11 @@ is_agent_installed() {
         qoder)
             [ -d "$HOME/.qoder" ] || command -v qoder &>/dev/null || command -v qodercli &>/dev/null
             ;;
+        qoder-cn)
+            # Qoder CN (国内版) is a Desktop-only product with no CLI command,
+            # so detection relies on its config directory alone.
+            [ -d "$HOME/.qoder-cn" ]
+            ;;
         qoderwork)
             [ -d "$HOME/.qoderwork" ]
             ;;
