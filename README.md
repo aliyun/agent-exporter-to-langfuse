@@ -106,6 +106,14 @@ bash deploy/installer.sh install \
 
 All parameters can also be passed as environment variables: `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`, `LANGFUSE_USER_ID`, `LANGFUSE_TAGS`.
 
+### Installing with new Langfuse credentials
+
+When `installer.sh install` runs with `--public-key` / `--secret-key` / `--base-url` (or the `LANGFUSE_*` environment variables) and `~/.agent-exporter-to-langfuse/config/config.toml` already exists, the provided values update the matching `[langfuse]` keys in that file. Keys whose values are not provided keep their existing values, and the rest of the file is left untouched. The install flow restarts the langstash service, so the new values take effect immediately.
+
+The per-agent env files (`~/.agent-exporter-to-langfuse/config/<agent>.env`) are rewritten with the provided values on every install.
+
+> Note: `langstash upgrade` does not modify `config.toml` (config is shared and preserved across versions). To rotate credentials, reinstall via `installer.sh install` with the new values.
+
 ## Upgrade
 
 ```bash

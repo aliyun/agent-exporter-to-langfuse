@@ -27,7 +27,7 @@ VERSION="$(cat "$REPO_ROOT/VERSION" | tr -d '[:space:]')"
 echo "Package: $TARBALL (v$VERSION)"
 echo ""
 
-e2e_suite "versioned-upgrade" 43
+e2e_suite "versioned-upgrade" 93
 
 # ============================================================
 e2e_case "E2E-1: Fresh install"
@@ -153,6 +153,151 @@ bash "$REPO_ROOT/deploy/installer.sh" install \
 
 e2e_check "reinstall succeeds" "test -f '$INSTALL_DIR/current'"
 e2e_check "user data preserved" "test -f '$INSTALL_DIR/data/custom.txt'"
+purge_install
+
+# ============================================================
+# E2E-5b / E2E-5c: install-time update of [langfuse] keys in an existing
+# config.toml. Scenario-local helpers below mutate config.toml between
+# reinstalls the way a user would (custom lines, removed section / keys).
+# ============================================================
+
+# Seed user-customized content into config.toml: a custom key inside
+# [storage], a trailing comment, and a custom section. The preserved-line
+# assertions below depend on these exact lines.
+seed_custom_config_lines() {
+    python3 - "$CONFIG_FILE" <<'PYEOF'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+if "[storage]" in text and "seeded_storage_note" not in text:
+    text = text.replace("[storage]", '[storage]\nseeded_storage_note = "keep-me"', 1)
+text += "\n# seeded custom comment\n[custom]\nseeded_key = \"seeded-value\"\n"
+open(path, "w").write(text)
+PYEOF
+}
+
+# Remove the whole [langfuse] section from config.toml (setup for the
+# section-backfill reinstall).
+strip_langfuse_section() {
+    python3 - "$CONFIG_FILE" <<'PYEOF'
+import re
+import sys
+path = sys.argv[1]
+text = open(path).read()
+m = re.search(r"^\[langfuse\]\s*$", text, re.MULTILINE)
+if not m:
+    sys.exit("no [langfuse] section found in " + path)
+nxt = re.search(r"^\[", text[m.end():], re.MULTILINE)
+end = m.end() + nxt.start() if nxt else len(text)
+open(path, "w").write(text[:m.start()] + text[end:])
+PYEOF
+}
+
+# Remove one key line from config.toml (setup for the key-backfill reinstall).
+remove_langfuse_key() {
+    python3 - "$CONFIG_FILE" "$1" <<'PYEOF'
+import re
+import sys
+path, key = sys.argv[1], sys.argv[2]
+text = open(path).read()
+line_re = re.compile(rf"^{re.escape(key)}\s*=\s*.*$", re.MULTILINE)
+new_text, count = line_re.subn("", text)
+if count != 1:
+    sys.exit(f"expected exactly one '{key}' line in {path}, found {count}")
+open(path, "w").write(new_text)
+PYEOF
+}
+
+# ============================================================
+e2e_case "E2E-5b: Reinstall updates provided [langfuse] keys in existing config"
+purge_install
+CONFIG_FILE="$INSTALL_DIR/config/config.toml"
+SEEDED_REF="/tmp/e2e-seeded-config-$$"
+
+# Fresh install with three values: the first-install template path writes
+# all three keys.
+e2e_cmd "LANGFUSE_PUBLIC_KEY='pk-lf-old' LANGFUSE_SECRET_KEY='sk-lf-old' LANGFUSE_BASE_URL='http://old-lf:3000' bash '$REPO_ROOT/deploy/installer.sh' install --package-url 'file://$TARBALL'"
+e2e_cmd_check "E2E-5b fresh install with three values exits 0"
+e2e_kv_check "E2E-5b fresh install writes public_key" public_key "pk-lf-old" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b fresh install writes secret_key" secret_key "sk-lf-old" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b fresh install writes base_url" base_url "http://old-lf:3000" "$CONFIG_FILE"
+
+# Seed user-customized content, then reinstall with three new values.
+e2e_cmd "seed_custom_config_lines"
+e2e_cmd_check "E2E-5b seeding custom config lines exits 0"
+cp "$CONFIG_FILE" "$SEEDED_REF"
+
+e2e_cmd "LANGFUSE_PUBLIC_KEY='pk-lf-new' LANGFUSE_SECRET_KEY='sk-lf-new' LANGFUSE_BASE_URL='http://new-lf:3000' bash '$REPO_ROOT/deploy/installer.sh' install --package-url 'file://$TARBALL'"
+e2e_cmd_check "E2E-5b reinstall with three new values exits 0"
+e2e_kv_check "E2E-5b reinstall updates public_key" public_key "pk-lf-new" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b reinstall updates secret_key" secret_key "sk-lf-new" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b reinstall updates base_url" base_url "http://new-lf:3000" "$CONFIG_FILE"
+e2e_grep_check "E2E-5b seeded [storage] custom line preserved" '^seeded_storage_note = "keep-me"$' "$CONFIG_FILE"
+e2e_grep_check "E2E-5b seeded comment preserved" '^# seeded custom comment$' "$CONFIG_FILE"
+e2e_grep_check "E2E-5b seeded custom section preserved" '^\[custom\]$' "$CONFIG_FILE"
+e2e_cmd "diff <(grep -Ev '^(public_key|secret_key|base_url) = ' '$SEEDED_REF') <(grep -Ev '^(public_key|secret_key|base_url) = ' '$CONFIG_FILE')"
+e2e_cmd_check "E2E-5b non-[langfuse] lines unchanged after reinstall"
+
+# Reinstall with only base_url provided: only that key changes.
+e2e_cmd "LANGFUSE_PUBLIC_KEY='' LANGFUSE_SECRET_KEY='' LANGFUSE_BASE_URL='http://final-lf:3000' bash '$REPO_ROOT/deploy/installer.sh' install --package-url 'file://$TARBALL'"
+e2e_cmd_check "E2E-5b reinstall with only base_url exits 0"
+e2e_kv_check "E2E-5b only provided base_url updated" base_url "http://final-lf:3000" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b unprovided public_key keeps existing value" public_key "pk-lf-new" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b unprovided secret_key keeps existing value" secret_key "sk-lf-new" "$CONFIG_FILE"
+
+# Reinstall with no Langfuse values: all three keys keep their values.
+e2e_cmd "LANGFUSE_PUBLIC_KEY='' LANGFUSE_SECRET_KEY='' LANGFUSE_BASE_URL='' bash '$REPO_ROOT/deploy/installer.sh' install --package-url 'file://$TARBALL'"
+e2e_cmd_check "E2E-5b reinstall with no langfuse values exits 0"
+e2e_kv_check "E2E-5b public_key kept when nothing provided" public_key "pk-lf-new" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b secret_key kept when nothing provided" secret_key "sk-lf-new" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b base_url kept when nothing provided" base_url "http://final-lf:3000" "$CONFIG_FILE"
+
+# Missing [langfuse] section: a reinstall with provided values recreates it.
+e2e_cmd "strip_langfuse_section"
+e2e_cmd_check "E2E-5b stripping [langfuse] section exits 0"
+e2e_nogrep_check "E2E-5b [langfuse] section absent after strip" '^\[langfuse\]$' "$CONFIG_FILE"
+e2e_cmd "LANGFUSE_PUBLIC_KEY='pk-lf-back' LANGFUSE_SECRET_KEY='sk-lf-back' LANGFUSE_BASE_URL='http://back-lf:3000' bash '$REPO_ROOT/deploy/installer.sh' install --package-url 'file://$TARBALL'"
+e2e_cmd_check "E2E-5b reinstall after section removal exits 0"
+e2e_grep_check "E2E-5b [langfuse] section recreated" '^\[langfuse\]$' "$CONFIG_FILE"
+e2e_kv_check "E2E-5b public_key backfilled with provided value" public_key "pk-lf-back" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b secret_key backfilled with provided value" secret_key "sk-lf-back" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b base_url backfilled with provided value" base_url "http://back-lf:3000" "$CONFIG_FILE"
+
+# Missing single key: a reinstall with only that value backfills it.
+e2e_cmd "remove_langfuse_key secret_key"
+e2e_cmd_check "E2E-5b removing secret_key line exits 0"
+e2e_nogrep_check "E2E-5b secret_key line absent after removal" '^secret_key[[:space:]]*=' "$CONFIG_FILE"
+e2e_cmd "LANGFUSE_PUBLIC_KEY='' LANGFUSE_SECRET_KEY='sk-lf-key2' LANGFUSE_BASE_URL='' bash '$REPO_ROOT/deploy/installer.sh' install --package-url 'file://$TARBALL'"
+e2e_cmd_check "E2E-5b reinstall after key removal exits 0"
+e2e_kv_check "E2E-5b secret_key backfilled with provided value" secret_key "sk-lf-key2" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b public_key unchanged when other key backfilled" public_key "pk-lf-back" "$CONFIG_FILE"
+e2e_kv_check "E2E-5b base_url unchanged when other key backfilled" base_url "http://back-lf:3000" "$CONFIG_FILE"
+
+rm -f "$SEEDED_REF"
+purge_install
+
+# ============================================================
+e2e_case "E2E-5c: Service reloads updated [langfuse] config (/health flip)"
+purge_install
+CONFIG_FILE="$INSTALL_DIR/config/config.toml"
+
+# Fresh install without any Langfuse values: the first-install template
+# writes empty keys, so /health reports no_credentials (503). wait_health
+# cannot succeed on 503, so keep HEALTH_TIMEOUT short for this install.
+e2e_cmd "HEALTH_TIMEOUT=6 LANGFUSE_PUBLIC_KEY='' LANGFUSE_SECRET_KEY='' LANGFUSE_BASE_URL='' bash '$REPO_ROOT/deploy/installer.sh' install --package-url 'file://$TARBALL'"
+e2e_cmd_check "E2E-5c fresh install without langfuse values exits 0"
+e2e_kv_check "E2E-5c valueless fresh install leaves public_key empty" public_key "" "$CONFIG_FILE"
+e2e_kv_check "E2E-5c valueless fresh install leaves secret_key empty" secret_key "" "$CONFIG_FILE"
+e2e_kv_check "E2E-5c valueless fresh install uses default base_url" base_url "https://us.cloud.langfuse.com" "$CONFIG_FILE"
+e2e_health_check "E2E-5c no credentials: /health is 503 no_credentials" 503 '"no_credentials"'
+
+# Reinstall with three values: the existing file's keys are updated, the
+# install flow restarts the service, and /health flips to configured. If the
+# service did not reload the new file (still holding empty credentials in
+# memory), the langfuse_configured check below fails.
+e2e_cmd "LANGFUSE_PUBLIC_KEY='pk-lf-flip' LANGFUSE_SECRET_KEY='sk-lf-flip' LANGFUSE_BASE_URL='http://flip-lf:3000' bash '$REPO_ROOT/deploy/installer.sh' install --package-url 'file://$TARBALL'"
+e2e_cmd_check "E2E-5c reinstall with three values exits 0"
+e2e_health_check "E2E-5c after reinstall /health is 200 with langfuse_configured true" 200 '"langfuse_configured":true'
 purge_install
 
 # ============================================================

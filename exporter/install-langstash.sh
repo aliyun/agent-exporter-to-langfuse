@@ -13,9 +13,11 @@ LOGS_DIR="$INSTALL_DIR/logs"
 # --- Colors ---
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 # --- 1. uv sync ---
 if ! command -v uv &>/dev/null; then
@@ -62,6 +64,38 @@ EOF
     info "Created $CONFIG_FILE"
 else
     info "Config already exists: $CONFIG_FILE"
+    # Key-level update of install-time provided Langfuse values: a non-empty
+    # value replaces or creates the matching [langfuse] key via
+    # src.config.set_config_value (same merge semantics as the /settings
+    # API); an empty value keeps the existing file value. Everything else in
+    # the file is left untouched.
+    VENV_PY="$EXPORTER_DIR/.venv/bin/python"
+    UPDATED_KEYS=""
+    for KEY_SPEC in \
+        "public_key:${LANGFUSE_PUBLIC_KEY:-}" \
+        "secret_key:${LANGFUSE_SECRET_KEY:-}" \
+        "base_url:${LANGFUSE_BASE_URL:-}"; do
+        KEY="${KEY_SPEC%%:*}"
+        VALUE="${KEY_SPEC#*:}"
+        [ -n "$VALUE" ] || continue
+        UPDATE_OUT="$(cd "$EXPORTER_DIR" && "$VENV_PY" -c '
+import sys
+from pathlib import Path
+from src.config import set_config_value
+set_config_value(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4]))
+' langfuse "$KEY" "$VALUE" "$CONFIG_FILE" 2>&1)" || {
+            UPDATE_RC=$?
+            error "Failed to update [langfuse] $KEY in $CONFIG_FILE (exit code: $UPDATE_RC)"
+            if [ -n "$UPDATE_OUT" ]; then
+                printf '%s\n' "$UPDATE_OUT" >&2
+            fi
+            return "$UPDATE_RC" 2>/dev/null || exit "$UPDATE_RC"
+        }
+        UPDATED_KEYS="$UPDATED_KEYS $KEY"
+    done
+    if [ -n "$UPDATED_KEYS" ]; then
+        info "Updated [langfuse] keys in existing config:$UPDATED_KEYS"
+    fi
 fi
 
 # --- 3. Platform-specific service installation ---
