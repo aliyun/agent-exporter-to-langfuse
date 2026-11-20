@@ -39,7 +39,7 @@ Export AI Agent session observability data (conversation turns, model calls, too
 |-------|-----------|-------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | [`hooks/claude-code/`](./hooks/claude-code/) | Collect Claude Code session data via Plugin Hook |
 | [Qoder](https://qoder.com) | [`hooks/qoder/`](./hooks/qoder/) | Collect Qoder (CLI / Desktop / QoderWake) session data via Plugin Hook |
-| Qoder CN | [`hooks/qoder-cn/`](./hooks/qoder-cn/) | Collect Qoder CN (国内版 Desktop) session data via Plugin Hook |
+| [Qoder CN](https://qoder.cn/) | [`hooks/qoder-cn/`](./hooks/qoder-cn/) | Collect Qoder CN (国内版 Desktop) session data via Plugin Hook |
 | [QoderWork](https://qoder.com/qoderwork) | [`hooks/qoderwork/`](./hooks/qoderwork/) | Collect QoderWork session data via Plugin Hook |
 | [OpenCode](https://opencode.ai) | [`hooks/opencode/`](./hooks/opencode/) | Collect OpenCode session data via Plugin Hook |
 | [Codex](https://developers.openai.com/codex) | [`hooks/codex/`](./hooks/codex/) | Collect OpenAI Codex CLI session data via Plugin Hook |
@@ -172,7 +172,7 @@ Access the built-in dashboard at `http://127.0.0.1:5288` to view:
 
 ## Langfuse Backend
 
-This project works with the open-source [Langfuse](https://langfuse.com) as well as [Alibaba Cloud Agent-Lens](https://help.aliyun.com/clickhouse/user-guide/agent-lens-overview), which is fully compatible with the Langfuse API.
+This project works with the open-source [Langfuse](https://langfuse.com) as well as [Alibaba Cloud Langfuse](https://help.aliyun.com/clickhouse/user-guide/agent-lens-overview), which is fully compatible with the Langfuse API.
 
 ## Development
 
