@@ -4,7 +4,7 @@ Trace every Qoder CN session to [Langfuse](https://langfuse.com) — turns, gene
 
 ## Supported Products
 
-Qoder CN is the mainland-China edition (国内版) of Qoder. This hook supports its Desktop form:
+[Qoder CN](https://qoder.cn/) is the mainland-China edition (国内版) of Qoder. This hook supports its Desktop form:
 
 | Product | Type | Notes |
 |---------|------|-------|
