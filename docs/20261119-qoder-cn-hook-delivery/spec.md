@@ -14,7 +14,7 @@ qoder-cn 与 qoder 的既有事实（设计阶段已验证，支撑上述契约�
 
 ## Decisions
 
-- design_source: `docs/designs/20261119-qoder-cn-hook-delivery.md`
+- design_source: `docs/20261119-qoder-cn-hook-delivery/design.md`
 
 ## Requirements
 

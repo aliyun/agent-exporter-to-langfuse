@@ -1,7 +1,7 @@
 # 实现计划：qoder-cn Hook 投递（Langfuse 观测）
 
 ## Header
-- source_spec: ../specs/20261119-qoder-cn-hook-delivery.md
+- source_spec: spec.md
 - source_requirements_sha256: sha256:a2c1b24449ff16846e9d765142fa0c6b34e5e9e15dde0f6f6aef3c021a31766c
 - accepted_debt: none
 - status: ready
